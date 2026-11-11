@@ -6,6 +6,25 @@ point at `http://127.0.0.1:8899/v1`; PAIG picks the backend from the model id
 prefix, forwards the request, and normalizes the reply to the OpenAI `/v1`
 shape.
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Angkuh-Org/PAIG/main/install.sh | sh
+```
+
+The installer fetches the `x86_64` or `aarch64` release binary, verifies its
+SHA-256, and installs `paig` to `~/.local/bin` (or `/usr/local/bin` as root):
+
+```text
+installed paig v0.1.0 -> /home/you/.local/bin/paig
+```
+
+Release binaries need glibc 2.35+. Set `PAIG_INSTALL_DIR` to change the target
+directory. Manual downloads, checksums, and provenance verification are in
+[`docs/install.md`](docs/install.md).
+
+## Build from source
+
 The binary is built from `std` plus raw FFI over vendored Mbed TLS: no cargo,
 no crates. TLS and the CA bundle are linked into the binary.
 
@@ -21,7 +40,7 @@ G2's sanctioned set is `libc` and glibc support libraries (`libm`,
 `libpthread`, `libdl`, `librt`, `libgcc_s`). The build gate checks `ldd` after
 linking and fails on anything else.
 
-# Quick start
+## Quick start
 
 Build the gateway:
 ```sh

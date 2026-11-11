@@ -30,7 +30,10 @@ rebuilt when a source, header, config, source list, or compiler flag changes.
 incremental builds reuse the C objects and
 only relink when the archive changes. 
 
-Because of `target-cpu=native`, build on the machine that will run the binary.
+`PAIG_TARGET_CPU` and `PAIG_MARCH` replace the native CPU baseline for rustc
+and the vendored C sources; local builds default to `native`. Release builds set
+them to `x86-64-v2`/`x86-64-v2` and `generic`/`armv8-a` so a binary runs on
+machines other than the builder. `PAIG_VERSION` stamps the `--version` output.
 The stripped binary targets 1.5 MiB (1,572,864 bytes); the build gate warns
 above it but never fails the build (G4). The embedded CA bundle is part of the
 binary, so there is no runtime `libssl`/`libcrypto` or system CA file.
@@ -52,6 +55,15 @@ generated build files. Vendor provenance and the update procedure are in
 | `bench` | build, then run `tests/bench.sh` |
 
 Tests use their own entrypoint: `./tests/test.sh`.
+
+## CI and releases
+
+`.github/workflows/ci.yml` builds and tests `x86_64` and `aarch64` on Ubuntu
+22.04. Pushing a `v*` tag runs `.github/workflows/release.yml`, which tests,
+stamps the tag into `paig --version`, attests provenance, and publishes
+`paig-linux-x86_64` and `paig-linux-aarch64` with matching `.sha256` files.
+[`install.sh`](../install.sh) consumes those assets; usage and verification are
+in [install.md](install.md).
 
 ## Test and benchmark
 

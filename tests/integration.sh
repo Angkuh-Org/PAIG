@@ -244,11 +244,37 @@ wait "$TLS_PAIG_PID" "$TLS_PID" 2>/dev/null || true
 TLS_PAIG_PID=
 TLS_PID=
 
-# Expired certificate: date validation must fail closed too.
-openssl req -x509 -newkey rsa:2048 -nodes \
-    -keyout "$TMP/tls-expired-key.pem" -out "$TMP/tls-expired-cert.pem" \
-    -not_before 20200101000000Z -not_after 20200102000000Z \
-    -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost' \
+# Expired certificate: date validation must fail closed too. `openssl req`
+# only gained -not_before/-not_after after 3.0, so sign through `openssl ca`,
+# whose -startdate/-enddate work across versions.
+mkdir -p "$TMP/ca/newcerts"
+: > "$TMP/ca/index.txt"
+echo 01 > "$TMP/ca/serial"
+cat > "$TMP/ca/openssl.cnf" <<EOF
+[ ca ]
+default_ca = CA_default
+[ CA_default ]
+dir = $TMP/ca
+database = \$dir/index.txt
+new_certs_dir = \$dir/newcerts
+serial = \$dir/serial
+default_md = sha256
+policy = policy_any
+x509_extensions = v3_ca
+[ policy_any ]
+commonName = supplied
+[ v3_ca ]
+subjectAltName = DNS:localhost
+basicConstraints = critical,CA:TRUE
+EOF
+openssl req -new -newkey rsa:2048 -nodes \
+    -keyout "$TMP/tls-expired-key.pem" -out "$TMP/tls-expired.csr" \
+    -subj '/CN=localhost' \
+    >"$TMP/tls-expired-csr.log" 2>&1 || fail "cannot generate expired TLS key"
+openssl ca -batch -selfsign -config "$TMP/ca/openssl.cnf" \
+    -keyfile "$TMP/tls-expired-key.pem" -in "$TMP/tls-expired.csr" \
+    -out "$TMP/tls-expired-cert.pem" \
+    -startdate 20200101000000Z -enddate 20200102000000Z -extensions v3_ca \
     >"$TMP/tls-expired-cert.log" 2>&1 || fail "cannot generate expired TLS certificate"
 openssl s_server -quiet -accept "127.0.0.1:$TLS_EXPIRED_PORT" \
     -cert "$TMP/tls-expired-cert.pem" -key "$TMP/tls-expired-key.pem" \

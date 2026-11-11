@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+            target_cpu: x86-64-v2
+            march: x86-64-v2
+          - runner: ubuntu-22.04-arm
+            arch: aarch64
+            target_cpu: generic
+            march: armv8-a
+    env:
+      RUST_VERSION: "1.99.1"
+      PAIG_TARGET_CPU: ${{ matrix.target_cpu }}
+      PAIG_MARCH: ${{ matrix.march }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install lld
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lld
+      - name: Install Rust
+        run: |
+          if command -v rustup >/dev/null 2>&1; then
+            rustup toolchain install "$RUST_VERSION" --profile minimal --no-self-update
+            rustup default "$RUST_VERSION"
+          else
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal --default-toolchain "$RUST_VERSION"
+            . "$HOME/.cargo/env"
+          fi
+          rustc --version
+      - name: Check shell entrypoints
+        run: sh -n build.sh install.sh tests/test.sh tests/integration.sh tests/bench.sh
+      - name: Build and test
+        run: ./tests/test.sh
+      - name: Smoke test
+        run: ./build/paig --version

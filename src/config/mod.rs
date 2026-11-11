@@ -1275,6 +1275,13 @@ fn print_cli_help() {
             "validate config and print the sources",
         ),
         (
+            "\u{f02b}",
+            "[v]",
+            "1;36",
+            "--version",
+            "print the build version",
+        ),
+        (
             "\u{f084}",
             "[k]",
             "1;33",
@@ -1331,6 +1338,7 @@ fn print_cli_help() {
     println!("  paig --init");
     println!("  paig --check");
     println!("  paig --start");
+    println!("  paig --version");
 }
 
 pub fn run_cli(argv: &[String]) -> i32 {
@@ -1354,6 +1362,10 @@ pub fn run_cli(argv: &[String]) -> i32 {
     };
     if argv.is_empty() || has("--help") || has("-h") {
         print_cli_help();
+        return 0;
+    }
+    if has("--version") || has("-V") {
+        println!("paig {}", crate::VERSION);
         return 0;
     }
     if has("--rules") {

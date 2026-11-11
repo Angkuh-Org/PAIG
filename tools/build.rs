@@ -35,8 +35,6 @@ const COMMON: &[&str] = &[
     "-C",
     "strip=symbols",
     "-C",
-    "target-cpu=native",
-    "-C",
     "link-arg=-Wl,--gc-sections",
     "-C",
     "link-arg=-Wl,--as-needed",
@@ -48,7 +46,6 @@ const COMMON: &[&str] = &[
 
 const MBEDTLS_CFLAGS: &[&str] = &[
     "-O2",
-    "-march=native",
     "-fPIC",
     "-ffunction-sections",
     "-fdata-sections",
@@ -58,6 +55,43 @@ const MBEDTLS_CFLAGS: &[&str] = &[
     "-DNDEBUG",
     "-DMBEDTLS_CONFIG_FILE=\"paig_config.h\"",
 ];
+
+fn target_cpu() -> String {
+    std::env::var("PAIG_TARGET_CPU")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "native".to_string())
+}
+
+fn target_march() -> String {
+    std::env::var("PAIG_MARCH")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "native".to_string())
+}
+
+fn build_version() -> String {
+    std::env::var("PAIG_VERSION")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "dev".to_string())
+}
+
+fn rustc_flags() -> Vec<String> {
+    let mut flags: Vec<String> = COMMON.iter().map(|flag| (*flag).to_string()).collect();
+    flags.push("-C".to_string());
+    flags.push(format!("target-cpu={}", target_cpu()));
+    flags
+}
+
+fn mbedtls_flags() -> Vec<String> {
+    let mut flags: Vec<String> = MBEDTLS_CFLAGS
+        .iter()
+        .map(|flag| (*flag).to_string())
+        .collect();
+    flags.push(format!("-march={}", target_march()));
+    flags
+}
 
 fn main() {
     let root = repo_root();
@@ -130,7 +164,12 @@ fn current_stamp() -> String {
         .output()
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .unwrap_or_default();
-    format!("rustc: {rustc}\nversion: {version}\nflags: {}\n", COMMON.join(" "))
+    format!(
+        "rustc: {rustc}\nversion: {version}\nflags: {}\ntarget-cpu: {}\npaig-version: {}\n",
+        COMMON.join(" "),
+        target_cpu(),
+        build_version()
+    )
 }
 
 fn cc_name() -> String {
@@ -177,8 +216,9 @@ fn c_stamp(root: &Path) -> String {
     let sources =
         fs::read_to_string(root.join("vendor/mbedtls/sources.txt")).unwrap_or_default();
     format!(
-        "cc: {cc}\nversion: {version}\nflags: {}\nsources:\n{sources}\n",
-        MBEDTLS_CFLAGS.join(" ")
+        "cc: {cc}\nversion: {version}\nflags: {} -march={}\nsources:\n{sources}\n",
+        MBEDTLS_CFLAGS.join(" "),
+        target_march()
     )
 }
 
@@ -215,7 +255,7 @@ fn compile_c_jobs(root: &Path, jobs: Vec<(PathBuf, PathBuf)>) -> Result<(), Stri
                 let mut command = Command::new(&cc);
                 command
                     .current_dir(root)
-                    .args(MBEDTLS_CFLAGS)
+                    .args(mbedtls_flags())
                     .arg("-I")
                     .arg(root.join("vendor/mbedtls"))
                     .arg("-I")
@@ -411,7 +451,8 @@ fn build(root: &Path) -> Result<(), String> {
     if rebuilt {
         let mut command = Command::new(rustc_name());
         command
-            .args(COMMON)
+            .args(rustc_flags())
+            .env("PAIG_VERSION", build_version())
             .arg("-C")
             .arg(format!("link-arg={}", archive.display()))
             .arg("-C")
@@ -446,7 +487,7 @@ fn check(root: &Path) -> Result<(), String> {
     let rmeta = build_dir.join("paig.rmeta");
     let mut command = Command::new(rustc_name());
     command
-        .args(COMMON)
+        .args(rustc_flags())
         .arg("--emit=metadata")
         .arg("-o")
         .arg(&rmeta)
