@@ -21,6 +21,11 @@ unsafe extern "C" {
 const SIGPIPE: i32 = 13;
 const SIG_DFL: usize = 0;
 
+pub const VERSION: &str = match option_env!("PAIG_VERSION") {
+    Some(version) => version,
+    None => "dev",
+};
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {

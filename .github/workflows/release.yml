@@ -1,0 +1,96 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+            target_cpu: x86-64-v2
+            march: x86-64-v2
+          - runner: ubuntu-22.04-arm
+            arch: aarch64
+            target_cpu: generic
+            march: armv8-a
+    env:
+      RUST_VERSION: "1.99.1"
+      PAIG_VERSION: ${{ github.ref_name }}
+      PAIG_TARGET_CPU: ${{ matrix.target_cpu }}
+      PAIG_MARCH: ${{ matrix.march }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install lld
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lld
+      - name: Install Rust
+        run: |
+          if command -v rustup >/dev/null 2>&1; then
+            rustup toolchain install "$RUST_VERSION" --profile minimal --no-self-update
+            rustup default "$RUST_VERSION"
+          else
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal --default-toolchain "$RUST_VERSION"
+            . "$HOME/.cargo/env"
+          fi
+          rustc --version
+      - name: Build and test
+        run: ./tests/test.sh
+      - name: Verify the binary carries the tag
+        run: test "$(./build/paig --version)" = "paig $PAIG_VERSION"
+      - name: Package
+        run: |
+          asset="paig-linux-${{ matrix.arch }}"
+          mkdir -p dist
+          cp build/paig "dist/$asset"
+          chmod 0755 "dist/$asset"
+          (cd dist && sha256sum "$asset" > "$asset.sha256")
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/paig-linux-${{ matrix.arch }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: paig-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: publish
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
