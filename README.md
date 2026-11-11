@@ -20,8 +20,9 @@ installed paig v0.1.0 -> /home/you/.local/bin/paig
 ```
 
 Release binaries need glibc 2.35+. Set `PAIG_INSTALL_DIR` to change the target
-directory. Manual downloads, checksums, and provenance verification are in
-[`docs/install.md`](docs/install.md).
+directory. If `~/.local/bin` is not on `PATH`, run the `export` line the
+installer prints. Manual downloads, checksums, and provenance verification are
+in [`docs/install.md`](docs/install.md).
 
 ## Build from source
 

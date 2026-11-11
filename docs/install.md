@@ -19,7 +19,9 @@ installed paig v0.1.0 -> /home/you/.local/bin/paig
 
 The installer verifies the release asset against its published SHA-256 and
 installs to `~/.local/bin` (or `/usr/local/bin` when run as root). If that
-directory is not on `PATH`, it prints the `export` line to add.
+directory is not on `PATH`, it prints the `export` line to add; `paig` is not
+resolvable until you run it (or start a new login shell on distros that add
+`~/.local/bin` to `PATH`).
 
 ## Options
 
@@ -61,6 +63,9 @@ downloading it:
 ```sh
 gh attestation verify paig-linux-x86_64 --repo Angkuh-Org/PAIG
 ```
+
+This needs `gh` 2.49 or newer; older releases do not include the `attestation`
+command.
 
 ## Uninstall
 
