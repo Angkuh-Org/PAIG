@@ -12,10 +12,21 @@ curl -fsSL https://raw.githubusercontent.com/Angkuh-Org/PAIG/main/install.sh | s
 Expected output (version depends on the latest release):
 
 ```text
-downloading paig-linux-x86_64 (latest)
-paig-linux-x86_64: OK
-installed paig v0.1.0 -> /home/you/.local/bin/paig
+  P A I G  ·  probably ai gateway
+  ────────────────────────────────────
+  linux / x86_64 · latest
+
+  ✔ download  paig-linux-x86_64 (1.2 MiB)
+  ✔ checksum  sha256 verified
+  ✔ install   /home/you/.local/bin/paig
+  ✔ verify    paig v0.1.0
+
+  next  paig --init
+        paig
 ```
+
+When stdout is not a terminal (a pipe or CI), the installer prints plain lines
+instead: `downloading ...`, the `sha256sum` result, and `installed ...`.
 
 The installer verifies the release asset against its published SHA-256 and
 installs to `~/.local/bin` (or `/usr/local/bin` when run as root). If that
