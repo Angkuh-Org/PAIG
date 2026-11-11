@@ -1,0 +1,364 @@
+{
+  "results_file": "benchmark/opencode/runs/opencode-free-20261110-194500.jsonl",
+  "results_sha256": "1bc9d7bf60d83f1af71921f679eb7ccf305b1a8ed79c66497286377821bc9098",
+  "generated_at": "2026-11-10T13:17:32+00:00",
+  "models": {
+    "opencode/beam-free": {
+      "correctness": {
+        "passed": 0,
+        "total": 9,
+        "graded": 0,
+        "score": "0/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": false,
+          "logic": false,
+          "sql": false,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": false
+        },
+        "latency_median_s": null
+      },
+      "stability": {
+        "usable": 0,
+        "total": 10,
+        "ok": "0/10",
+        "format_3_bullets": 0,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "latency_max_s": null
+      },
+      "errors": {
+        "429": 19
+      },
+      "empty_content": 0,
+      "null_content_200": 0,
+      "tool_call": false
+    },
+    "opencode/big-pickle": {
+      "correctness": {
+        "passed": 0,
+        "total": 9,
+        "graded": 0,
+        "score": "0/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": false,
+          "logic": false,
+          "sql": false,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": false
+        },
+        "latency_median_s": null
+      },
+      "stability": {
+        "usable": 0,
+        "total": 10,
+        "ok": "0/10",
+        "format_3_bullets": 0,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "latency_max_s": null
+      },
+      "errors": {
+        "429": 19
+      },
+      "empty_content": 0,
+      "null_content_200": 0,
+      "tool_call": false
+    },
+    "opencode/crouton-alpha-free": {
+      "correctness": {
+        "passed": 0,
+        "total": 9,
+        "graded": 0,
+        "score": "0/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": false,
+          "logic": false,
+          "sql": false,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": false
+        },
+        "latency_median_s": null
+      },
+      "stability": {
+        "usable": 0,
+        "total": 10,
+        "ok": "0/10",
+        "format_3_bullets": 0,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "latency_max_s": null
+      },
+      "errors": {
+        "410": 19
+      },
+      "empty_content": 0,
+      "null_content_200": 0,
+      "tool_call": false
+    },
+    "opencode/deepseek-v4.1-flash-free": {
+      "correctness": {
+        "passed": 0,
+        "total": 9,
+        "graded": 0,
+        "score": "0/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": false,
+          "logic": false,
+          "sql": false,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": false
+        },
+        "latency_median_s": null
+      },
+      "stability": {
+        "usable": 0,
+        "total": 10,
+        "ok": "0/10",
+        "format_3_bullets": 0,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "latency_max_s": null
+      },
+      "errors": {
+        "429": 19
+      },
+      "empty_content": 0,
+      "null_content_200": 0,
+      "tool_call": false
+    },
+    "opencode/flint-40b-free": {
+      "correctness": {
+        "passed": 0,
+        "total": 9,
+        "graded": 0,
+        "score": "0/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": false,
+          "logic": false,
+          "sql": false,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": false
+        },
+        "latency_median_s": null
+      },
+      "stability": {
+        "usable": 0,
+        "total": 10,
+        "ok": "0/10",
+        "format_3_bullets": 0,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "latency_max_s": null
+      },
+      "errors": {
+        "429": 19
+      },
+      "empty_content": 0,
+      "null_content_200": 0,
+      "tool_call": false
+    },
+    "opencode/glm-5.3-flash-free": {
+      "correctness": {
+        "passed": 0,
+        "total": 9,
+        "graded": 0,
+        "score": "0/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": false,
+          "logic": false,
+          "sql": false,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": false
+        },
+        "latency_median_s": null
+      },
+      "stability": {
+        "usable": 0,
+        "total": 10,
+        "ok": "0/10",
+        "format_3_bullets": 0,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "latency_max_s": null
+      },
+      "errors": {
+        "429": 19
+      },
+      "empty_content": 0,
+      "null_content_200": 0,
+      "tool_call": false
+    },
+    "opencode/mimo-v2.6-flash-free": {
+      "correctness": {
+        "passed": 0,
+        "total": 9,
+        "graded": 0,
+        "score": "0/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": false,
+          "logic": false,
+          "sql": false,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": false
+        },
+        "latency_median_s": null
+      },
+      "stability": {
+        "usable": 0,
+        "total": 10,
+        "ok": "0/10",
+        "format_3_bullets": 0,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "latency_max_s": null
+      },
+      "errors": {
+        "429": 19
+      },
+      "empty_content": 0,
+      "null_content_200": 0,
+      "tool_call": false
+    },
+    "opencode/nemotron-3.5-lightning-free": {
+      "correctness": {
+        "passed": 0,
+        "total": 9,
+        "graded": 0,
+        "score": "0/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": false,
+          "logic": false,
+          "sql": false,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": false
+        },
+        "latency_median_s": null
+      },
+      "stability": {
+        "usable": 0,
+        "total": 10,
+        "ok": "0/10",
+        "format_3_bullets": 0,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "latency_max_s": null
+      },
+      "errors": {
+        "429": 19
+      },
+      "empty_content": 0,
+      "null_content_200": 0,
+      "tool_call": false
+    },
+    "opencode/nemotron-3.5-super-vl-free": {
+      "correctness": {
+        "passed": 0,
+        "total": 9,
+        "graded": 0,
+        "score": "0/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": false,
+          "logic": false,
+          "sql": false,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": false
+        },
+        "latency_median_s": null
+      },
+      "stability": {
+        "usable": 0,
+        "total": 10,
+        "ok": "0/10",
+        "format_3_bullets": 0,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "latency_max_s": null
+      },
+      "errors": {
+        "429": 19
+      },
+      "empty_content": 0,
+      "null_content_200": 0,
+      "tool_call": false
+    },
+    "opencode/pulse-alpha-free": {
+      "correctness": {
+        "passed": 0,
+        "total": 9,
+        "graded": 0,
+        "score": "0/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": false,
+          "logic": false,
+          "sql": false,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": false
+        },
+        "latency_median_s": null
+      },
+      "stability": {
+        "usable": 0,
+        "total": 10,
+        "ok": "0/10",
+        "format_3_bullets": 0,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "latency_max_s": null
+      },
+      "errors": {
+        "400": 19
+      },
+      "empty_content": 0,
+      "null_content_200": 0,
+      "tool_call": false
+    }
+  },
+  "ranking": [],
+  "verdict": {
+    "best": null,
+    "stable_models": [],
+    "capacity_limited": true,
+    "adapter_suspect": false
+  }
+}

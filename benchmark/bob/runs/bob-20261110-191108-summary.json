@@ -1,0 +1,424 @@
+{
+  "results_file": "benchmark/bob/runs/bob-20261110-191108.jsonl",
+  "results_sha256": "e15acba9f16e029eb41d8d925305a284249f646962e0831a7999aae84a83237a",
+  "generated_at": "2026-11-10T12:26:04+00:00",
+  "models": {
+    "bob/premium": {
+      "correctness": {
+        "passed": 6,
+        "total": 9,
+        "score": "6/9",
+        "tasks": {
+          "math": true,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 5.264
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 4.127,
+        "latency_p90_s": 4.681,
+        "latency_max_s": 4.769
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    },
+    "bob/premium-ide": {
+      "correctness": {
+        "passed": 8,
+        "total": 9,
+        "score": "8/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": true,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 2.174
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 1.982,
+        "latency_p90_s": 2.483,
+        "latency_max_s": 2.582
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    },
+    "bob/premium-shell": {
+      "correctness": {
+        "passed": 8,
+        "total": 9,
+        "score": "8/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": true,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 2.214
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 1.927,
+        "latency_p90_s": 2.242,
+        "latency_max_s": 2.84
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    },
+    "bob/dev-sec-ops-premium": {
+      "correctness": {
+        "passed": 9,
+        "total": 9,
+        "score": "9/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": true,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": true,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 1.724
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 5.248,
+        "latency_p90_s": 5.808,
+        "latency_max_s": 6.607
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    },
+    "bob/dev-sec-ops-premium-west": {
+      "correctness": {
+        "passed": 9,
+        "total": 9,
+        "score": "9/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": true,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": true,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 2.626
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 5.206,
+        "latency_p90_s": 5.592,
+        "latency_max_s": 5.744
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    },
+    "bob/fast": {
+      "correctness": {
+        "passed": 7,
+        "total": 9,
+        "score": "7/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": false,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 1.743
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 1.409,
+        "latency_p90_s": 1.518,
+        "latency_max_s": 2.068
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    },
+    "bob/explorer": {
+      "correctness": {
+        "passed": 7,
+        "total": 9,
+        "score": "7/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": false,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 1.266
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 1.348,
+        "latency_p90_s": 1.47,
+        "latency_max_s": 1.501
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    },
+    "bob/wxO-model": {
+      "correctness": {
+        "passed": 8,
+        "total": 9,
+        "score": "8/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": true,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 2.262
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 1.961,
+        "latency_p90_s": 2.388,
+        "latency_max_s": 3.26
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    },
+    "bob/background": {
+      "correctness": {
+        "passed": 8,
+        "total": 9,
+        "score": "8/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": false,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": true,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 2.354
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 3.678,
+        "latency_p90_s": 4.155,
+        "latency_max_s": 5.136
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    },
+    "bob/security": {
+      "correctness": {
+        "passed": 8,
+        "total": 9,
+        "score": "8/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": false,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": true,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 1.863
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 3.357,
+        "latency_p90_s": 4.366,
+        "latency_max_s": 5.092
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    },
+    "bob/openai/gpt-oss-20b": {
+      "correctness": {
+        "passed": 8,
+        "total": 9,
+        "score": "8/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": false,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": true,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 2.228
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 3.073,
+        "latency_p90_s": 3.482,
+        "latency_max_s": 4.122
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    },
+    "bob/gpt-oss-20b": {
+      "correctness": {
+        "passed": 8,
+        "total": 9,
+        "score": "8/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": false,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": true,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 1.794
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 3.433,
+        "latency_p90_s": 4.119,
+        "latency_max_s": 4.775
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 1,
+      "tool_call": true
+    }
+  },
+  "ranking": [
+    "bob/dev-sec-ops-premium",
+    "bob/dev-sec-ops-premium-west",
+    "bob/gpt-oss-20b",
+    "bob/security",
+    "bob/premium-ide",
+    "bob/premium-shell",
+    "bob/openai/gpt-oss-20b",
+    "bob/wxO-model",
+    "bob/background",
+    "bob/explorer",
+    "bob/fast",
+    "bob/premium"
+  ],
+  "verdict": {
+    "best": "bob/dev-sec-ops-premium",
+    "stable_models": [
+      "bob/premium",
+      "bob/premium-ide",
+      "bob/premium-shell",
+      "bob/dev-sec-ops-premium",
+      "bob/dev-sec-ops-premium-west",
+      "bob/fast",
+      "bob/explorer",
+      "bob/wxO-model",
+      "bob/background",
+      "bob/security",
+      "bob/openai/gpt-oss-20b",
+      "bob/gpt-oss-20b"
+    ],
+    "capacity_limited": false,
+    "adapter_suspect": false
+  }
+}

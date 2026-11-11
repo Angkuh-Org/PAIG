@@ -1,0 +1,84 @@
+{
+  "results_file": "benchmark/opencode/runs/opencode-go-20261110-194120.jsonl",
+  "results_sha256": "d1fc563bef704ff9bec6947cafed7ad1ab397c808082feb5d3ec6d651f461a4e",
+  "generated_at": "2026-11-10T12:45:00+00:00",
+  "models": {
+    "opencode-go/iceman-contributor-free": {
+      "correctness": {
+        "passed": 6,
+        "total": 9,
+        "score": "6/9",
+        "tasks": {
+          "math": true,
+          "modpow": false,
+          "python-output": true,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": true,
+          "tool-call": false
+        },
+        "latency_median_s": 3.167
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 9.805,
+        "latency_p90_s": 12.754,
+        "latency_max_s": 13.447
+      },
+      "errors": {},
+      "empty_content": 0,
+      "null_content_200": 0,
+      "tool_call": false
+    },
+    "opencode-go/beam-free": {
+      "correctness": {
+        "passed": 8,
+        "total": 9,
+        "score": "8/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": false,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": true,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 1.903
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 2.064,
+        "latency_p90_s": 2.53,
+        "latency_max_s": 3.104
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 0,
+      "tool_call": true
+    }
+  },
+  "ranking": [
+    "opencode-go/beam-free",
+    "opencode-go/iceman-contributor-free"
+  ],
+  "verdict": {
+    "best": "opencode-go/beam-free",
+    "stable_models": [
+      "opencode-go/iceman-contributor-free",
+      "opencode-go/beam-free"
+    ],
+    "capacity_limited": false,
+    "adapter_suspect": false
+  }
+}

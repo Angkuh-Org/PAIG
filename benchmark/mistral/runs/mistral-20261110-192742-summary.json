@@ -1,0 +1,255 @@
+{
+  "results_file": "benchmark/mistral/runs/mistral-20261110-192742.jsonl",
+  "results_sha256": "906fc7d43196b515ee2b49c960efd079ac1b4a2e764d404d3a97adb7a5e4b0ff",
+  "generated_at": "2026-11-10T12:41:46+00:00",
+  "models": {
+    "mistral/mistral-large-4": {
+      "correctness": {
+        "passed": 8,
+        "total": 9,
+        "score": "8/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": false,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": true,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 3.665
+      },
+      "stability": {
+        "usable": 0,
+        "total": 10,
+        "ok": "0/10",
+        "format_3_bullets": 0,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "latency_max_s": null
+      },
+      "errors": {},
+      "empty_content": 11,
+      "null_content_200": 0,
+      "tool_call": true
+    },
+    "mistral/codestral-latest": {
+      "correctness": {
+        "passed": 4,
+        "total": 9,
+        "score": "4/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": true,
+          "logic": false,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 1.574
+      },
+      "stability": {
+        "usable": 7,
+        "total": 10,
+        "ok": "7/10",
+        "format_3_bullets": 7,
+        "latency_median_s": 0.869,
+        "latency_p90_s": 2.363,
+        "latency_max_s": 6.656
+      },
+      "errors": {
+        "429": 5
+      },
+      "empty_content": 1,
+      "null_content_200": 0,
+      "tool_call": true
+    },
+    "mistral/mistral-code-latest": {
+      "correctness": {
+        "passed": 3,
+        "total": 9,
+        "score": "3/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": true,
+          "logic": false,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": true
+        },
+        "latency_median_s": 1.007
+      },
+      "stability": {
+        "usable": 7,
+        "total": 10,
+        "ok": "7/10",
+        "format_3_bullets": 7,
+        "latency_median_s": 0.955,
+        "latency_p90_s": 1.404,
+        "latency_max_s": 1.765
+      },
+      "errors": {
+        "429": 5
+      },
+      "empty_content": 1,
+      "null_content_200": 0,
+      "tool_call": true
+    },
+    "mistral/ministral-14b-latest": {
+      "correctness": {
+        "passed": 4,
+        "total": 9,
+        "score": "4/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": true
+        },
+        "latency_median_s": 1.732
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 1.521,
+        "latency_p90_s": 2.404,
+        "latency_max_s": 3.001
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 0,
+      "tool_call": true
+    },
+    "mistral/ministral-8b-latest": {
+      "correctness": {
+        "passed": 4,
+        "total": 9,
+        "score": "4/9",
+        "tasks": {
+          "math": false,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": true,
+          "logic": false,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 1.022
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 1.106,
+        "latency_p90_s": 1.281,
+        "latency_max_s": 1.409
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 0,
+      "tool_call": true
+    },
+    "mistral/ministral-3b-latest": {
+      "correctness": {
+        "passed": 4,
+        "total": 9,
+        "score": "4/9",
+        "tasks": {
+          "math": true,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": true,
+          "logic": false,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": false,
+          "tool-call": true
+        },
+        "latency_median_s": 0.819
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 0.97,
+        "latency_p90_s": 1.001,
+        "latency_max_s": 1.474
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 0,
+      "tool_call": true
+    },
+    "mistral/voxtral-small-latest": {
+      "correctness": {
+        "passed": 5,
+        "total": 9,
+        "score": "5/9",
+        "tasks": {
+          "math": true,
+          "modpow": false,
+          "python-output": false,
+          "json-extract": true,
+          "logic": false,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 0.99
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 0.838,
+        "latency_p90_s": 1.655,
+        "latency_max_s": 12.624
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 0,
+      "tool_call": true
+    }
+  },
+  "ranking": [
+    "mistral/mistral-large-4",
+    "mistral/voxtral-small-latest",
+    "mistral/ministral-3b-latest",
+    "mistral/ministral-8b-latest",
+    "mistral/ministral-14b-latest",
+    "mistral/codestral-latest",
+    "mistral/mistral-code-latest"
+  ],
+  "verdict": {
+    "best": "mistral/mistral-large-4",
+    "stable_models": [
+      "mistral/ministral-14b-latest",
+      "mistral/ministral-8b-latest",
+      "mistral/ministral-3b-latest",
+      "mistral/voxtral-small-latest"
+    ],
+    "capacity_limited": true,
+    "adapter_suspect": false
+  }
+}

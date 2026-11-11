@@ -1,0 +1,16 @@
+# Secrets and local overrides
+.env
+paig.config.json
+*.key
+
+# Build output
+build/
+*.rmeta
+*.o
+*.d
+
+# OS noise
+.DS_Store
+
+# Python test cache
+__pycache__/

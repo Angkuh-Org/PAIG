@@ -1,0 +1,53 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8899
+  },
+  "debug": false,
+  "advisorMaxBytes": 1000000,
+  "ledgerPath": "",
+  "commandCode": {
+    "baseUrl": "https://api.commandcode.ai",
+    "apiKey": "",
+    "apiKeyFile": "",
+    "projectSlug": "",
+    "models": null,
+    "excludedModels": null,
+    "fetchRetries": 2,
+    "fetchBackoffMs": 500,
+    "headers": {
+      "user-agent": "cli",
+      "x-command-code-version": "1.88.0",
+      "x-cli-environment": "production",
+      "x-taste-learning": "true"
+    }
+  },
+  "opencode": {
+    "baseUrl": "https://opencode.ai/inference/go/openai/v1",
+    "freeBaseUrl": "https://opencode.ai/inference/openai/v1",
+    "apiKey": "",
+    "apiKeyFile": "",
+    "bin": "",
+    "models": ["beam-free", "big-pickle", "crouton-alpha-free", "deepseek-v4.1-flash-free", "flint-40b-free", "glm-5.3-flash-free", "mimo-v2.6-flash-free", "nemotron-3.5-lightning-free", "nemotron-3.5-super-vl-free", "pulse-alpha-free"],
+    "goModels": ["beam-free", "crouton-alpha-free", "iceman-contributor-free"],
+    "timeoutMs": 180000
+  },
+  "kilo": {
+    "baseUrl": "https://ai-gateway.kilo.ai/api/v1",
+    "apiKey": "",
+    "allModels": false
+  },
+  "bob": {
+    "baseUrl": "https://api.us-east.bob.ibm.com/inference/v1",
+    "apiKey": "",
+    "apiKeyFile": "~/.paig/bob.key",
+    "teamId": "",
+    "userAgent": "bob-shell/2.0.9"
+  },
+  "mistral": {
+    "baseUrl": "https://api.mistral.ai/v1",
+    "apiKey": "",
+    "apiKeyFile": "~/.paig/mistral.key",
+    "models": null
+  }
+}

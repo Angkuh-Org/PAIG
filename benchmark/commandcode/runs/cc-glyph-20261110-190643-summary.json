@@ -1,0 +1,51 @@
+{
+  "results_file": "benchmark/commandcode/runs/cc-glyph-20261110-190643.jsonl",
+  "results_sha256": "7953e71e4edccda7552b48e26d6b6e26a90743d8d5caa52bcc9f87068a4f38c3",
+  "generated_at": "2026-11-10T13:18:01+00:00",
+  "models": {
+    "cc/stealth/glyph-cluster:free": {
+      "correctness": {
+        "passed": 7,
+        "total": 9,
+        "graded": 9,
+        "score": "7/9",
+        "tasks": {
+          "math": true,
+          "modpow": true,
+          "python-output": false,
+          "json-extract": true,
+          "logic": true,
+          "sql": true,
+          "indonesian-json": false,
+          "needle": true,
+          "tool-call": true
+        },
+        "latency_median_s": 3.856
+      },
+      "stability": {
+        "usable": 10,
+        "total": 10,
+        "ok": "10/10",
+        "format_3_bullets": 10,
+        "latency_median_s": 6.829,
+        "latency_p90_s": 7.98,
+        "latency_max_s": 9.062
+      },
+      "errors": {},
+      "empty_content": 1,
+      "null_content_200": 0,
+      "tool_call": true
+    }
+  },
+  "ranking": [
+    "cc/stealth/glyph-cluster:free"
+  ],
+  "verdict": {
+    "best": "cc/stealth/glyph-cluster:free",
+    "stable_models": [
+      "cc/stealth/glyph-cluster:free"
+    ],
+    "capacity_limited": false,
+    "adapter_suspect": false
+  }
+}
