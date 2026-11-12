@@ -19,7 +19,7 @@ Expected output (version depends on the latest release):
   ✔ download  paig-linux-x86_64 (1.2 MiB)
   ✔ checksum  sha256 verified
   ✔ install   /home/you/.local/bin/paig
-  ✔ verify    paig v0.1.0
+  ✔ verify    paig v0.1.1
 
   next  paig --init
         paig
@@ -57,7 +57,7 @@ through that override.
 ## Manual install
 
 ```sh
-version=v0.1.0
+version=v0.1.1
 arch=x86_64   # or aarch64
 base=https://github.com/Angkuh-Org/PAIG/releases/download/$version
 curl -fLO "$base/paig-linux-$arch"

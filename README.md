@@ -16,7 +16,7 @@ The installer fetches the `x86_64` or `aarch64` release binary, verifies its
 SHA-256, and installs `paig` to `~/.local/bin` (or `/usr/local/bin` as root):
 
 ```text
-  ✔ verify    paig v0.1.0
+  ✔ verify    paig v0.1.1
 ```
 
 Release binaries need glibc 2.35+. Set `PAIG_INSTALL_DIR` to change the target
