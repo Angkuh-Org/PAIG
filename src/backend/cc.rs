@@ -975,6 +975,15 @@ fn stream_error_status(event: &Value) -> u16 {
         .unwrap_or(502)
 }
 
+fn write_text_frame(out: &mut Vec<u8>, field: &str, text: &str) -> io::Result<()> {
+    out.push(b'{');
+    crate::json::write_json_string(out, field)?;
+    out.push(b':');
+    crate::json::write_json_string(out, text)?;
+    out.extend_from_slice(b"},\"finish_reason\":null,\"logprobs\":null}]}\n\n");
+    Ok(())
+}
+
 struct StreamState {
     id: String,
     model: String,
@@ -987,14 +996,29 @@ struct StreamState {
     had_tool_call: bool,
     tool_index: i64,
     tool_indices: HashMap<String, i64>,
+    /// `data: {...,"choices":[{"index":0,"delta":` — identical for every
+    /// chunk, so text deltas only append their value and the tail.
+    head: Vec<u8>,
+    frame: Vec<u8>,
 }
 
 impl StreamState {
     fn new(body: &Value) -> Self {
+        let id = format!("chatcmpl-{}", crate::crypto::random_hex(12));
+        let model = requested_model(body);
+        let created = crate::util::now_unix();
+        let mut head = Vec::with_capacity(id.len() + model.len() + 128);
+        head.extend_from_slice(b"data: {\"id\":");
+        crate::json::write_json_string(&mut head, &id).expect("Vec writes cannot fail");
+        head.extend_from_slice(b",\"object\":\"chat.completion.chunk\",\"created\":");
+        crate::json::write_i64(&mut head, created as i64).expect("Vec writes cannot fail");
+        head.extend_from_slice(b",\"model\":");
+        crate::json::write_json_string(&mut head, &model).expect("Vec writes cannot fail");
+        head.extend_from_slice(b",\"choices\":[{\"index\":0,\"delta\":");
         StreamState {
-            id: format!("chatcmpl-{}", crate::crypto::random_hex(12)),
-            model: requested_model(body),
-            created: crate::util::now_unix(),
+            id,
+            model,
+            created,
             role_sent: false,
             finish_sent: false,
             saw_finish: false,
@@ -1003,15 +1027,21 @@ impl StreamState {
             had_tool_call: false,
             tool_index: 0,
             tool_indices: HashMap::new(),
+            head,
+            frame: Vec::new(),
         }
     }
 
-    fn chunk(
-        &mut self,
-        res: &mut Response,
-        delta: Value,
-        finish_reason: Option<&str>,
-    ) -> io::Result<()> {
+    /// Single-string delta (`content` or `reasoning_content`) without building
+    /// a DOM, stringifying it, and formatting it into a second allocation.
+    fn chunk_text(&mut self, res: &mut Response, field: &str, text: &str) -> io::Result<()> {
+        self.frame.clear();
+        self.frame.extend_from_slice(&self.head);
+        write_text_frame(&mut self.frame, field, text)?;
+        res.sse_write(&self.frame)
+    }
+
+    fn dom_frame(&self, delta: Value, finish_reason: Option<&str>) -> String {
         let mut choice = Value::obj();
         choice.insert("index", Value::Int(0));
         choice.insert("delta", delta);
@@ -1028,7 +1058,16 @@ impl StreamState {
         root.insert("created", Value::Int(self.created as i64));
         root.insert("model", Value::string(&self.model));
         root.insert("choices", Value::Array(vec![choice]));
-        let frame = format!("data: {}\n\n", root.stringify());
+        format!("data: {}\n\n", root.stringify())
+    }
+
+    fn chunk(
+        &mut self,
+        res: &mut Response,
+        delta: Value,
+        finish_reason: Option<&str>,
+    ) -> io::Result<()> {
+        let frame = self.dom_frame(delta, finish_reason);
         res.sse_write(frame.as_bytes())
     }
 
@@ -1050,9 +1089,8 @@ impl StreamState {
                 if let Some(text) = event.get("text").and_then(Value::as_str) {
                     if !text.is_empty() {
                         self.ensure_role(res).map_err(|e| e.to_string())?;
-                        let mut delta = Value::obj();
-                        delta.insert("content", Value::string(text));
-                        self.chunk(res, delta, None).map_err(|e| e.to_string())?;
+                        self.chunk_text(res, "content", text)
+                            .map_err(|e| e.to_string())?;
                     }
                 }
             }
@@ -1060,9 +1098,8 @@ impl StreamState {
                 if let Some(text) = event.get("text").and_then(Value::as_str) {
                     if !text.is_empty() {
                         self.ensure_role(res).map_err(|e| e.to_string())?;
-                        let mut delta = Value::obj();
-                        delta.insert("reasoning_content", Value::string(text));
-                        self.chunk(res, delta, None).map_err(|e| e.to_string())?;
+                        self.chunk_text(res, "reasoning_content", text)
+                            .map_err(|e| e.to_string())?;
                     }
                 }
             }
@@ -1160,14 +1197,14 @@ fn stream_error_frame(res: &mut Response, message: &str, status: Option<u16>) {
     let _ = res.sse_write(frame.as_bytes());
 }
 
-/// Command Code currently streams bare NDJSON objects; 
-fn cc_stream_event(line: &str) -> Option<Value> {
-    let text = line.trim();
-    let payload = text.strip_prefix("data:").unwrap_or(text).trim();
-    if payload.is_empty() || payload == "[DONE]" || !payload.starts_with('{') {
+/// Command Code currently streams bare NDJSON objects;
+fn cc_stream_event(line: &[u8]) -> Option<Value> {
+    let text = line.trim_ascii();
+    let payload = text.strip_prefix(b"data:").unwrap_or(text).trim_ascii();
+    if payload.is_empty() || payload == b"[DONE]".as_slice() || !payload.starts_with(b"{") {
         return None;
     }
-    Value::parse_str(payload).ok()
+    Value::parse(payload).ok()
 }
 
 fn stream_cc(
@@ -1178,9 +1215,10 @@ fn stream_cc(
 ) -> Result<(), String> {
     res.start_sse().map_err(|error| error.to_string())?;
     let mut state = StreamState::new(body);
+    let mut line = Vec::new();
     loop {
-        let line = match upstream.read_line() {
-            Ok(line) => line,
+        let has_line = match upstream.read_line_into(&mut line) {
+            Ok(has_line) => has_line,
             Err(error) => {
                 let message = format!("upstream stream error: {error}");
                 stream_error_frame(res, &message, Some(502));
@@ -1188,20 +1226,22 @@ fn stream_cc(
                 return Ok(());
             }
         };
+        if !has_line {
+            break;
+        }
         if line.is_empty() {
-            if upstream.at_eof() {
-                break;
-            }
             continue;
         }
-        let text = String::from_utf8_lossy(&line);
-        let trimmed = text.trim();
-        if trimmed == "data: [DONE]" || trimmed == "[DONE]" {
+        let trimmed = line.trim_ascii();
+        if trimmed == b"data: [DONE]".as_slice() || trimmed == b"[DONE]".as_slice() {
             break;
         }
         let Some(event) = cc_stream_event(trimmed) else {
             if config.debug {
-                logw!("non-JSON stream line {}", crate::util::truncate_utf8(trimmed, 200));
+                logw!(
+                    "non-JSON stream line {}",
+                    crate::util::truncate_utf8(&String::from_utf8_lossy(trimmed), 200)
+                );
             }
             continue;
         };
@@ -1236,21 +1276,23 @@ fn collect_cc(
     let mut usage = None;
     let mut tool_calls = Vec::new();
     let mut lines = 0usize;
+    let mut line = Vec::new();
     loop {
         if lines % 16 == 0 && res.client_closed() {
             return Ok(());
         }
         lines += 1;
-        let line = upstream.read_line().map_err(|error| error.to_string())?;
+        let has_line = upstream
+            .read_line_into(&mut line)
+            .map_err(|error| error.to_string())?;
+        if !has_line {
+            break;
+        }
         if line.is_empty() {
-            if upstream.at_eof() {
-                break;
-            }
             continue;
         }
-        let text = String::from_utf8_lossy(&line);
-        let trimmed = text.trim();
-        if trimmed == "data: [DONE]" || trimmed == "[DONE]" {
+        let trimmed = line.trim_ascii();
+        if trimmed == b"data: [DONE]".as_slice() || trimmed == b"[DONE]".as_slice() {
             break;
         }
         let Some(event) = cc_stream_event(trimmed) else {
@@ -1369,15 +1411,60 @@ mod tests {
     #[test]
     fn cc_stream_event_accepts_ndjson_and_sse() {
         let bare = r#"{"type":"text-delta","id":"txt-0","text":"OK"}"#;
-        let event = cc_stream_event(bare).expect("bare NDJSON event");
+        let event = cc_stream_event(bare.as_bytes()).expect("bare NDJSON event");
         assert_eq!(event.get("type").unwrap().as_str(), Some("text-delta"));
         assert_eq!(event.get("text").unwrap().as_str(), Some("OK"));
 
         let sse = format!("data: {bare}");
-        assert_eq!(cc_stream_event(&sse).unwrap().get("text").unwrap().as_str(), Some("OK"));
-        assert!(cc_stream_event("data: [DONE]").is_none());
-        assert!(cc_stream_event("[DONE]").is_none());
-        assert!(cc_stream_event("event: message").is_none());
+        assert_eq!(
+            cc_stream_event(sse.as_bytes()).unwrap().get("text").unwrap().as_str(),
+            Some("OK")
+        );
+        assert!(cc_stream_event(b"data: [DONE]").is_none());
+        assert!(cc_stream_event(b"[DONE]").is_none());
+        assert!(cc_stream_event(b"event: message").is_none());
+    }
+
+    #[test]
+    fn text_frames_match_the_dom_serializer() {
+        for text in ["hello", "a\"b\\c\n", "é😀"] {
+            let mut head = Vec::new();
+            head.extend_from_slice(
+                b"data: {\"id\":\"chatcmpl-x\",\"object\":\"chat.completion.chunk\",\
+                  \"created\":1,\"model\":\"cc/test\",\"choices\":[{\"index\":0,\"delta\":",
+            );
+            let mut fast = head.clone();
+            write_text_frame(&mut fast, "content", text).unwrap();
+
+            let mut delta = Value::obj();
+            delta.insert("content", Value::string(text));
+            let mut choice = Value::obj();
+            choice.insert("index", Value::Int(0));
+            choice.insert("delta", delta);
+            choice.insert("finish_reason", Value::Null);
+            choice.insert("logprobs", Value::Null);
+            let mut root = Value::obj();
+            root.insert("id", Value::string("chatcmpl-x"));
+            root.insert("object", Value::string("chat.completion.chunk"));
+            root.insert("created", Value::Int(1));
+            root.insert("model", Value::string("cc/test"));
+            root.insert("choices", Value::Array(vec![choice]));
+            let slow = format!("data: {}\n\n", root.stringify());
+            assert_eq!(fast, slow.as_bytes(), "text={text:?}");
+        }
+    }
+
+    #[test]
+    fn stream_head_matches_the_dom_prefix() {
+        let body = Value::parse_str(r#"{"model":"cc/test-model"}"#).unwrap();
+        let state = StreamState::new(&body);
+        let mut fast = state.head.clone();
+        write_text_frame(&mut fast, "content", "x").unwrap();
+
+        let mut delta = Value::obj();
+        delta.insert("content", Value::string("x"));
+        let slow = state.dom_frame(delta, None);
+        assert_eq!(fast, slow.as_bytes());
     }
 
     #[test]

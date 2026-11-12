@@ -200,6 +200,7 @@ pub struct Response {
     reusable: bool,
     body_done: bool,
     line_buf: Vec<u8>,
+    line_pos: usize,
     pool: Arc<Pool>,
     key: String,
     released: bool,
@@ -223,13 +224,20 @@ impl Response {
 
     pub fn read_all(&mut self) -> io::Result<Vec<u8>> {
         let mut out = Vec::new();
-        let mut buf = [0u8; 16 * 1024];
         loop {
-            let n = self.read_body(&mut buf)?;
+            const CHUNK: usize = 16 * 1024;
+            let len = out.len();
+            out.reserve(CHUNK);
+            let spare = out.spare_capacity_mut();
+            // SAFETY: reserve guarantees CHUNK writable bytes after `len`;
+            // read_body initializes the prefix it reports and only that
+            // prefix is committed.
+            let dst = unsafe { std::slice::from_raw_parts_mut(spare.as_mut_ptr() as *mut u8, CHUNK) };
+            let n = self.read_body(dst)?;
             if n == 0 {
                 break;
             }
-            out.extend_from_slice(&buf[..n]);
+            unsafe { out.set_len(len + n) };
             if out.len() > rules::MAX_BODY_BYTES {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -241,35 +249,59 @@ impl Response {
         Ok(out)
     }
 
-    /// Read one line without the trailing newline. Returns 0 bytes at EOF.
-    pub fn read_line(&mut self) -> io::Result<Vec<u8>> {
+    /// Read one line without the trailing newline into `out` (cleared first).
+    /// Returns false at EOF. Consumed bytes stay in `line_buf` behind
+    /// `line_pos` until the next fill, so an n-line body is not n memmoves.
+    pub fn read_line_into(&mut self, out: &mut Vec<u8>) -> io::Result<bool> {
+        out.clear();
         loop {
-            if let Some(pos) = self.line_buf.iter().position(|&b| b == b'\n') {
-                let mut line: Vec<u8> = self.line_buf.drain(..=pos).collect();
-                line.pop();
-                if line.ends_with(b"\r") {
-                    line.pop();
+            if let Some(rel) = self.line_buf[self.line_pos..].iter().position(|&b| b == b'\n') {
+                let end = self.line_pos + rel;
+                out.extend_from_slice(&self.line_buf[self.line_pos..end]);
+                self.line_pos = end + 1;
+                if out.ends_with(b"\r") {
+                    out.pop();
                 }
-                return Ok(line);
+                if self.line_pos == self.line_buf.len() {
+                    self.line_buf.clear();
+                    self.line_pos = 0;
+                }
+                return Ok(true);
             }
-            if self.line_buf.len() > rules::MAX_BODY_BYTES {
+            if self.line_buf.len() - self.line_pos > rules::MAX_BODY_BYTES {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "SSE line too long"));
             }
-            let mut buf = [0u8; 8 * 1024];
-            let n = self.read_body(&mut buf)?;
-            if n == 0 {
-                let line = std::mem::take(&mut self.line_buf);
-                return Ok(line);
+            if self.line_pos > 0 {
+                self.line_buf.drain(..self.line_pos);
+                self.line_pos = 0;
             }
-            self.line_buf.extend_from_slice(&buf[..n]);
+            const CHUNK: usize = 8 * 1024;
+            let len = self.line_buf.len();
+            self.line_buf.reserve(CHUNK);
+            let spare = self.line_buf.spare_capacity_mut();
+            // SAFETY: reserve guarantees CHUNK writable bytes after `len`;
+            // read_body initializes the prefix it reports and only that
+            // prefix is committed.
+            let dst = unsafe { std::slice::from_raw_parts_mut(spare.as_mut_ptr() as *mut u8, CHUNK) };
+            let n = self.read_body(dst)?;
+            unsafe { self.line_buf.set_len(len + n) };
+            if n == 0 {
+                if self.line_pos < self.line_buf.len() {
+                    out.extend_from_slice(&self.line_buf[self.line_pos..]);
+                    self.line_buf.clear();
+                    self.line_pos = 0;
+                    return Ok(true);
+                }
+                self.line_buf.clear();
+                self.line_pos = 0;
+                return Ok(false);
+            }
         }
     }
 
-    /// True once the response body has been fully consumed and no buffered
-    /// line remains. `read_line` returns an empty vec at EOF forever; callers
-    /// must check this before treating an empty line as an SSE separator.
+    /// True once the body is consumed and no buffered line remains.
     pub fn at_eof(&self) -> bool {
-        self.body_done && self.line_buf.is_empty()
+        self.body_done && self.line_pos == self.line_buf.len()
     }
 
     /// Decoded body bytes, without chunk framing. Used by streaming proxies.
@@ -587,6 +619,7 @@ impl HttpClient {
             reusable,
             body_done,
             line_buf: Vec::new(),
+            line_pos: 0,
             pool: Arc::clone(&self.pool),
             key: key.to_string(),
             released: false,

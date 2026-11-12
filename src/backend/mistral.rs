@@ -199,14 +199,18 @@ fn forward_error(
 
 fn stream_upstream(res: &mut Response, upstream: &mut UpstreamResponse) -> Result<(), String> {
     res.start_sse().map_err(|error| error.to_string())?;
+    let mut line = Vec::new();
     loop {
-        let line = match upstream.read_line() {
-            Ok(line) => line,
+        let has_line = match upstream.read_line_into(&mut line) {
+            Ok(has_line) => has_line,
             Err(error) => {
                 logw!("mistral stream read error: {error}");
                 break;
             }
         };
+        if !has_line {
+            break;
+        }
         if line.is_empty() {
             if upstream.at_eof() {
                 break;

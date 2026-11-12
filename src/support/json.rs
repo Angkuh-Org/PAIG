@@ -1,7 +1,8 @@
 //! Minimal owned JSON DOM. No serde, no allocation tricks we cannot explain.
 //! Objects keep insertion order in a Vec; lookups are linear because PAIG's
-//! objects are small. Parsing uses a temporary index so duplicate keys can be
-//! resolved last-wins without quadratic behavior.
+//! objects are small. Parsing scans small objects by hand and only builds an
+//! index past a threshold, so duplicate keys stay last-wins without quadratic
+//! behavior on adversarial objects.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -117,9 +118,37 @@ impl Value {
     }
 
     pub fn stringify(&self) -> String {
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(self.serialized_len_hint());
         self.write_to(&mut out).expect("Vec writes cannot fail");
-        String::from_utf8(out).expect("JSON serialization is UTF-8")
+        // SAFETY: every branch of write_to emits valid UTF-8: string bodies are
+        // copied from `&str`, while escapes, keys, and numbers are ASCII.
+        unsafe { String::from_utf8_unchecked(out) }
+    }
+
+    /// Lower-bound size of `stringify()` output. Numbers reserve their widest
+    /// form and escapes reserve none, so the writer may still grow once; the
+    /// point is to avoid the 8/16/32/... allocation ladder before the copy.
+    fn serialized_len_hint(&self) -> usize {
+        match self {
+            Value::Null => 4,
+            Value::Bool(true) => 4,
+            Value::Bool(false) => 5,
+            Value::Int(_) => 20,
+            Value::Float(_) => 24,
+            Value::Str(s) => s.len() + 2,
+            Value::Array(items) => {
+                2 + items
+                    .iter()
+                    .map(|item| item.serialized_len_hint() + 1)
+                    .sum::<usize>()
+            }
+            Value::Object(items) => {
+                2 + items
+                    .iter()
+                    .map(|(key, value)| key.len() + 3 + value.serialized_len_hint())
+                    .sum::<usize>()
+            }
+        }
     }
 
     pub fn write_to<W: Write>(&self, out: &mut W) -> io::Result<()> {
@@ -127,7 +156,7 @@ impl Value {
             Value::Null => out.write_all(b"null"),
             Value::Bool(true) => out.write_all(b"true"),
             Value::Bool(false) => out.write_all(b"false"),
-            Value::Int(v) => write!(out, "{v}"),
+            Value::Int(v) => write_i64(out, *v),
             Value::Float(v) => {
                 if !v.is_finite() {
                     out.write_all(b"null")
@@ -180,9 +209,74 @@ impl Value {
     }
 }
 
-fn write_json_string<W: Write>(out: &mut W, value: &str) -> io::Result<()> {
+const SWAR_ONES: u64 = 0x0101_0101_0101_0101;
+const SWAR_HIGHS: u64 = 0x8080_8080_8080_8080;
+const HEX: &[u8; 16] = b"0123456789abcdef";
+
+#[inline]
+fn zero_byte(word: u64) -> u64 {
+    word.wrapping_sub(SWAR_ONES) & !word & SWAR_HIGHS
+}
+
+/// First byte JSON cannot copy verbatim: `"`, `\`, or a control byte below
+/// 0x20. Eight bytes per iteration. A borrow from a low byte only sets flags
+/// above it, and the first flagged byte is the first true hit, so the lowest
+/// set bit is the byte to stop on.
+#[inline]
+fn find_special(bytes: &[u8]) -> Option<usize> {
+    let mut index = 0;
+    while index + 8 <= bytes.len() {
+        let word = u64::from_le_bytes(bytes[index..index + 8].try_into().unwrap());
+        let quote = zero_byte(word ^ 0x2222_2222_2222_2222);
+        let backslash = zero_byte(word ^ 0x5c5c_5c5c_5c5c_5c5c);
+        let control = word.wrapping_sub(0x2020_2020_2020_2020) & !word & SWAR_HIGHS;
+        let hits = quote | backslash | control;
+        if hits != 0 {
+            return Some(index + (hits.trailing_zeros() as usize >> 3));
+        }
+        index += 8;
+    }
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte < 0x20 || byte == b'"' || byte == b'\\' {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+#[inline]
+pub(crate) fn write_i64<W: Write>(out: &mut W, value: i64) -> io::Result<()> {
+    let mut buf = [0u8; 20];
+    let negative = value < 0;
+    let mut magnitude = value.unsigned_abs();
+    let mut index = buf.len();
+    loop {
+        index -= 1;
+        buf[index] = b'0' + (magnitude % 10) as u8;
+        magnitude /= 10;
+        if magnitude == 0 {
+            break;
+        }
+    }
+    if negative {
+        index -= 1;
+        buf[index] = b'-';
+    }
+    out.write_all(&buf[index..])
+}
+
+pub(crate) fn write_json_string<W: Write>(out: &mut W, value: &str) -> io::Result<()> {
     out.write_all(b"\"")?;
-    for &byte in value.as_bytes() {
+    let bytes = value.as_bytes();
+    let mut start = 0;
+    while let Some(offset) = find_special(&bytes[start..]) {
+        let index = start + offset;
+        if index > start {
+            out.write_all(&bytes[start..index])?;
+        }
+        let byte = bytes[index];
         match byte {
             b'"' => out.write_all(b"\\\"")?,
             b'\\' => out.write_all(b"\\\\")?,
@@ -191,9 +285,22 @@ fn write_json_string<W: Write>(out: &mut W, value: &str) -> io::Result<()> {
             b'\n' => out.write_all(b"\\n")?,
             b'\r' => out.write_all(b"\\r")?,
             b'\t' => out.write_all(b"\\t")?,
-            0x00..=0x1f => write!(out, "\\u{:04x}", byte)?,
-            _ => out.write_all(&[byte])?,
+            _ => {
+                let escape = [
+                    b'\\',
+                    b'u',
+                    b'0',
+                    b'0',
+                    HEX[(byte >> 4) as usize],
+                    HEX[(byte & 0xf) as usize],
+                ];
+                out.write_all(&escape)?;
+            }
         }
+        start = index + 1;
+    }
+    if start < bytes.len() {
+        out.write_all(&bytes[start..])?;
     }
     out.write_all(b"\"")
 }
@@ -280,7 +387,10 @@ impl<'a> Parser<'a> {
         self.enter()?;
         self.pos += 1; // {
         let mut items = Vec::new();
-        let mut index: HashMap<String, usize> = HashMap::new();
+        // Objects are small, so scanning by hand is cheaper than SipHash. The
+        // index only exists to keep pathological key counts linear; it is
+        // built once the object proves it is not small.
+        let mut index: Option<HashMap<String, usize>> = None;
         self.skip_ws();
         if self.peek() == Some(b'}') {
             self.pos += 1;
@@ -298,11 +408,24 @@ impl<'a> Parser<'a> {
                 return Err(self.error("expected ':'"));
             }
             let value = self.parse_value()?;
-            if let Some(&slot) = index.get(&key) {
-                items[slot].1 = value;
+            if let Some(map) = &mut index {
+                if let Some(&slot) = map.get(&key) {
+                    items[slot].1 = value;
+                } else {
+                    map.insert(key.clone(), items.len());
+                    items.push((key, value));
+                }
+            } else if let Some((_, slot)) = items.iter_mut().find(|(k, _)| *k == key) {
+                *slot = value;
             } else {
-                index.insert(key.clone(), items.len());
                 items.push((key, value));
+                if items.len() == 16 {
+                    let mut map = HashMap::with_capacity(32);
+                    for (slot, (key, _)) in items.iter().enumerate() {
+                        map.insert(key.clone(), slot);
+                    }
+                    index = Some(map);
+                }
             }
             self.skip_ws();
             match self.bump() {
@@ -356,7 +479,17 @@ impl<'a> Parser<'a> {
         }
         let mut out = Vec::new();
         loop {
-            let byte = self.bump().ok_or_else(|| self.error("unterminated string"))?;
+            let start = self.pos;
+            let Some(offset) = find_special(&self.bytes[start..]) else {
+                self.pos = self.bytes.len();
+                return Err(self.error("unterminated string"));
+            };
+            let index = start + offset;
+            if index > start {
+                out.extend_from_slice(&self.bytes[start..index]);
+            }
+            let byte = self.bytes[index];
+            self.pos = index + 1;
             match byte {
                 b'"' => break,
                 b'\\' => {
@@ -392,8 +525,7 @@ impl<'a> Parser<'a> {
                         _ => return Err(self.error("invalid escape")),
                     }
                 }
-                0x00..=0x1f => return Err(self.error("control character in string")),
-                _ => out.push(byte),
+                _ => return Err(self.error("control character in string")),
             }
         }
         String::from_utf8(out).map_err(|_| self.error("invalid UTF-8 in string"))
@@ -523,5 +655,89 @@ mod tests {
         assert!(Value::parse_str("{}x").is_err());
         assert!(Value::parse_str("{\"a\":01}").is_err());
         assert!(Value::parse_str("\"unterminated").is_err());
+    }
+
+    #[test]
+    fn escapes_match_the_canonical_form() {
+        let value = Value::string("a\"b\\c\n\r\t\u{8}\u{c}\u{1}é😀");
+        assert_eq!(
+            value.stringify(),
+            r#""a\"b\\c\n\r\t\b\f\u0001é😀""#
+        );
+        assert_eq!(Value::parse_str(&value.stringify()).unwrap(), value);
+    }
+
+    #[test]
+    fn special_bytes_are_found_at_every_run_offset() {
+        for offset in 0..24 {
+            let mut text = "x".repeat(offset);
+            text.push_str("q\\\"\n");
+            let encoded = Value::string(text.as_str()).stringify();
+            assert_eq!(Value::parse_str(&encoded).unwrap().as_str(), Some(text.as_str()));
+        }
+    }
+
+    #[test]
+    fn find_special_matches_a_scalar_scan() {
+        fn scalar(bytes: &[u8]) -> Option<usize> {
+            bytes
+                .iter()
+                .position(|&byte| byte < 0x20 || byte == b'"' || byte == b'\\')
+        }
+        for byte in 0u8..=255 {
+            let bytes = [b'a', b'b', byte, b'c'];
+            assert_eq!(find_special(&bytes), scalar(&bytes), "{bytes:?}");
+        }
+        let alphabet = [
+            0x00u8, 0x09, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x5b, 0x5c, 0x5d, 0x7f, 0x80, 0xc3,
+            0xa9, 0xff,
+        ];
+        let mut state = 0x1234_5678u32;
+        for len in 0..=64 {
+            for _ in 0..200 {
+                let mut bytes = Vec::with_capacity(len);
+                for _ in 0..len {
+                    state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    bytes.push(alphabet[(state as usize) % alphabet.len()]);
+                }
+                assert_eq!(find_special(&bytes), scalar(&bytes), "{bytes:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn error_offsets_survive_the_run_scanner() {
+        assert_eq!(Value::parse_str("\"a\u{1}\"").unwrap_err().offset, 3);
+        assert_eq!(Value::parse_str("\"ab").unwrap_err().offset, 3);
+        assert_eq!(Value::parse_str(r#""\x""#).unwrap_err().offset, 3);
+        assert_eq!(Value::parse_str(r#""\ud83d""#).unwrap_err().offset, 8);
+    }
+
+    #[test]
+    fn integer_writer_matches_display() {
+        for value in [0i64, 7, -7, 123_456_789_012_345, i64::MAX, i64::MIN] {
+            let mut out = Vec::new();
+            write_i64(&mut out, value).unwrap();
+            assert_eq!(String::from_utf8(out).unwrap(), format!("{value}"));
+        }
+    }
+
+    #[test]
+    fn large_objects_stay_last_wins() {
+        let mut json = String::from("{");
+        for index in 0..40 {
+            if index != 0 {
+                json.push(',');
+            }
+            json.push_str(&format!("\"k{index}\":{index}"));
+        }
+        json.push('}');
+        let value = Value::parse_str(&json).unwrap();
+        assert_eq!(value.as_object().unwrap().len(), 40);
+        let duplicate = format!("{}{}", &json[..json.len() - 1], ",\"k7\":\"late\"}");
+        assert_eq!(
+            Value::parse_str(&duplicate).unwrap().get("k7").unwrap().as_str(),
+            Some("late")
+        );
     }
 }

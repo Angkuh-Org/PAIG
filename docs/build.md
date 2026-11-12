@@ -44,6 +44,36 @@ Mbed TLS 3.6.7 needs no CMake, Perl, Python, or
 generated build files. Vendor provenance and the update procedure are in
 [`vendor/mbedtls/README.paig.md`](../vendor/mbedtls/README.paig.md).
 
+## Profiling
+
+`build/paig` is stripped. For disassembly or callgrind, build a symbol-bearing
+twin with the same flags and the source path spelled exactly as the build does
+(the path is embedded, so a different argv shifts PC-relative addresses):
+
+```sh
+ROOT=$PWD
+PAIG_VERSION=dev rustc --edition 2024 -C opt-level=3 -C lto=fat \
+  -C codegen-units=1 -C panic=abort -C debug-assertions=off \
+  -C overflow-checks=off -C target-cpu=generic -C strip=none \
+  -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--as-needed \
+  -C link-arg=-fuse-ld=lld \
+  -C link-arg=$ROOT/build/mbedtls/libmbedtls.a -C link-arg=-lpthread \
+  -o $ROOT/build/paig.nostrip $ROOT/src/main.rs
+objcopy -O binary --only-section=.text build/paig /tmp/rel.text
+objcopy -O binary --only-section=.text build/paig.nostrip /tmp/sym.text
+sha256sum /tmp/rel.text /tmp/sym.text   # must match before trusting symbols
+```
+
+`build/paig.nostrip` keeps the symbol table but not debug info, so the code is
+identical to the release. Build it with the same CPU/march flags as the
+artifact under test (`generic`/`armv8-a` for a release, `native` for a local
+build), or the hash will not match. Profile it with `valgrind --tool=callgrind
+--cache-sim=yes --branch-sim=yes --dump-instr=yes`; the code section hash, not
+the file name, is what makes the profile trustworthy.
+
+The v0.1.0 vs v0.1.1 comparison chart is
+[`profile-v0.1.0-vs-v0.1.1.png`](profile-v0.1.0-vs-v0.1.1.png).
+
 ## Commands
 
 | Command | Action |
@@ -68,7 +98,7 @@ in [install.md](install.md).
 ## Test and benchmark
 
 ```sh
-./tests/test.sh      # 51 unit tests + real-binary integration test
+./tests/test.sh      # 61 unit tests + real-binary integration test
 ./build.sh bench     # binary size, startup, idle RSS, health/chat latency
 ```
 

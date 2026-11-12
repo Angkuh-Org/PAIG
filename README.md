@@ -87,6 +87,22 @@ Background control (`paig.pid` and `paig.log` live in `~/.paig/`):
 ./build/paig --restart
 ```
 
+## Performance
+
+v0.1.1 cuts per-request JSON/SSE work without changing the wire format.
+Callgrind on hash-verified release twins, same synthetic workload:
+
+![PAIG v0.1.0 vs v0.1.1 benchmark](docs/profile-v0.1.0-vs-v0.1.1.png)
+
+- streaming: 78% fewer instructions, 4.51× less CPU work
+- non-streaming: 47% fewer instructions, 1.90× less CPU work
+- health: 17% fewer instructions, 1.21× less CPU work
+- D1 write misses on health: 98% fewer; allocator cost on streaming: 89% less
+- binary: 1.245 MB → 1.248 MB, still under the 1.5 MiB gate
+
+These are loopback instruction-count ratios, not wall-clock latency. Method and
+profiling recipe: [`docs/build.md`](docs/build.md#profiling).
+
 ## Model routing
 
 The model prefix selects the backend; the prefix is stripped before the

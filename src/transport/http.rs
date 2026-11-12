@@ -49,7 +49,7 @@ impl Request {
 fn has_token(value: &str, token: &str) -> bool {
     value
         .split(',')
-        .any(|part| part.trim().eq_ignore_ascii_case(token))
+        .any(|part| part.trim_ascii().eq_ignore_ascii_case(token))
 }
 
 #[derive(Debug)]
@@ -293,32 +293,41 @@ pub fn reason_phrase(status: u16) -> &'static str {
 }
 
 fn read_more(stream: &mut TcpStream, buf: &mut Vec<u8>) -> io::Result<usize> {
-    let mut chunk = [0u8; 16 * 1024];
-    let n = stream.read(&mut chunk)?;
-    if n > 0 {
-        buf.extend_from_slice(&chunk[..n]);
-    }
+    const CHUNK: usize = 16 * 1024;
+    let len = buf.len();
+    buf.reserve(CHUNK);
+    let spare = buf.spare_capacity_mut();
+    // SAFETY: reserve guarantees CHUNK writable bytes after `len`; read()
+    // initializes the prefix it reports, and only that prefix is committed.
+    let dst = unsafe { std::slice::from_raw_parts_mut(spare.as_mut_ptr() as *mut u8, CHUNK) };
+    let n = stream.read(dst)?;
+    unsafe { buf.set_len(len + n) };
     Ok(n)
 }
 
-fn find_header_end(buf: &[u8]) -> Option<usize> {
-    if let Some(pos) = buf.windows(4).position(|window| window == b"\r\n\r\n") {
-        return Some(pos + 4);
+fn find_header_end(buf: &[u8], from: usize) -> Option<usize> {
+    let window = &buf[from..];
+    if let Some(pos) = window.windows(4).position(|window| window == b"\r\n\r\n") {
+        return Some(from + pos + 4);
     }
-    if let Some(pos) = buf.windows(2).position(|window| window == b"\n\n") {
-        return Some(pos + 2);
+    if let Some(pos) = window.windows(2).position(|window| window == b"\n\n") {
+        return Some(from + pos + 2);
     }
     None
 }
 
 pub fn read_request(stream: &mut TcpStream, buf: &mut Vec<u8>) -> Result<Option<Request>, HttpError> {
+    let mut scanned = 0usize;
     let header_end = loop {
-        if let Some(end) = find_header_end(buf) {
+        if let Some(end) = find_header_end(buf, scanned) {
             break end;
         }
         if buf.len() > rules::MAX_HEADER_BYTES {
             return Err(HttpError::new(431, "request headers too large"));
         }
+        // A terminator can only start in the last three bytes we already saw;
+        // continuing from there makes header assembly linear instead of n^2.
+        scanned = buf.len().saturating_sub(3);
         match read_more(stream, buf) {
             Ok(0) => {
                 if buf.is_empty() {
@@ -336,62 +345,68 @@ pub fn read_request(stream: &mut TcpStream, buf: &mut Vec<u8>) -> Result<Option<
         }
     };
 
-    let header_bytes: Vec<u8> = buf.drain(..header_end).collect();
-    if header_bytes.len() > rules::MAX_HEADER_BYTES {
+    if header_end > rules::MAX_HEADER_BYTES {
         return Err(HttpError::new(431, "request headers too large"));
     }
-    let text = String::from_utf8_lossy(&header_bytes);
-    let mut lines = text.split('\n');
-    let request_line = lines.next().unwrap_or("").trim_end_matches('\r');
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or("").to_string();
-    let target = parts.next().unwrap_or("").to_string();
-    let version = parts.next().unwrap_or("HTTP/1.1").to_string();
-    if method.is_empty() || target.is_empty() {
-        return Err(HttpError::new(400, "malformed request line"));
-    }
-    let path = target
-        .strip_prefix("http://")
-        .or_else(|| target.strip_prefix("https://"))
-        .and_then(|rest| rest.find('/').map(|index| &rest[index..]))
-        .unwrap_or(target.as_str())
-        .to_string();
+    let (method, path, version, headers, content_length, chunked) = {
+        let text = match std::str::from_utf8(&buf[..header_end]) {
+            Ok(text) => std::borrow::Cow::Borrowed(text),
+            Err(_) => String::from_utf8_lossy(&buf[..header_end]),
+        };
+        let mut lines = text.split('\n');
+        let request_line = lines.next().unwrap_or("").trim_end_matches('\r');
+        let mut parts = request_line.split_ascii_whitespace();
+        let method = parts.next().unwrap_or("").to_string();
+        let target = parts.next().unwrap_or("").to_string();
+        let version = parts.next().unwrap_or("HTTP/1.1").to_string();
+        if method.is_empty() || target.is_empty() {
+            return Err(HttpError::new(400, "malformed request line"));
+        }
+        let path = target
+            .strip_prefix("http://")
+            .or_else(|| target.strip_prefix("https://"))
+            .and_then(|rest| rest.find('/').map(|index| &rest[index..]))
+            .unwrap_or(target.as_str())
+            .to_string();
 
-    let mut headers = Vec::new();
-    for line in lines {
-        let line = line.trim_end_matches('\r');
-        if line.is_empty() {
-            break;
-        }
-        let Some((name, value)) = line.split_once(':') else { continue };
-        let name = name.trim();
-        if name.is_empty() {
-            continue;
-        }
-        headers.push((name.to_string(), value.trim().to_string()));
-    }
-
-    let mut content_length = None;
-    for (name, value) in &headers {
-        if !name.eq_ignore_ascii_case("content-length") {
-            continue;
-        }
-        let parsed = value
-            .trim()
-            .parse::<usize>()
-            .map_err(|_| HttpError::new(400, "invalid content-length"))?;
-        if let Some(existing) = content_length {
-            if existing != parsed {
-                return Err(HttpError::new(400, "conflicting content-length"));
+        let mut headers = Vec::with_capacity(16);
+        for line in lines {
+            let line = line.trim_end_matches('\r');
+            if line.is_empty() {
+                break;
             }
-        } else {
-            content_length = Some(parsed);
+            let Some((name, value)) = line.split_once(':') else { continue };
+            let name = name.trim_ascii();
+            if name.is_empty() {
+                continue;
+            }
+            headers.push((name.to_string(), value.trim_ascii().to_string()));
         }
-    }
-    let chunked = headers
-        .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("transfer-encoding"))
-        .any(|(_, value)| has_token(value, "chunked"));
+
+        let mut content_length = None;
+        for (name, value) in &headers {
+            if !name.eq_ignore_ascii_case("content-length") {
+                continue;
+            }
+            let parsed = value
+                .trim_ascii()
+                .parse::<usize>()
+                .map_err(|_| HttpError::new(400, "invalid content-length"))?;
+            if let Some(existing) = content_length {
+                if existing != parsed {
+                    return Err(HttpError::new(400, "conflicting content-length"));
+                }
+            } else {
+                content_length = Some(parsed);
+            }
+        }
+        let chunked = headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("transfer-encoding"))
+            .any(|(_, value)| has_token(value, "chunked"));
+        (method, path, version, headers, content_length, chunked)
+    };
+    buf.drain(..header_end);
 
     if headers.iter().any(|(name, value)| {
         name.eq_ignore_ascii_case("expect") && has_token(value, "100-continue")
@@ -424,6 +439,11 @@ pub fn read_request(stream: &mut TcpStream, buf: &mut Vec<u8>) -> Result<Option<
 }
 
 fn read_exact_body(stream: &mut TcpStream, buf: &mut Vec<u8>, length: usize) -> Result<Vec<u8>, HttpError> {
+    if buf.len() < length {
+        // content-length is a claim from the peer: commit at most a small
+        // prefix up front and let read_more grow as real bytes arrive.
+        buf.reserve((length - buf.len()).min(256 * 1024));
+    }
     while buf.len() < length {
         match read_more(stream, buf) {
             Ok(0) => return Err(HttpError::new(400, "connection closed during body")),
@@ -431,7 +451,10 @@ fn read_exact_body(stream: &mut TcpStream, buf: &mut Vec<u8>, length: usize) -> 
             Err(error) => return Err(HttpError::from(error)),
         }
     }
-    Ok(buf.drain(..length).collect())
+    // Hand the body allocation to the caller and keep any pipelined bytes as
+    // the next request's buffer; split_off copies only that small tail.
+    let tail = buf.split_off(length);
+    Ok(std::mem::replace(buf, tail))
 }
 
 fn read_line(stream: &mut TcpStream, buf: &mut Vec<u8>) -> Result<Vec<u8>, HttpError> {
@@ -631,5 +654,58 @@ mod tests {
         drop(client);
         std::thread::sleep(Duration::from_millis(50));
         assert!(response.client_closed());
+    }
+
+    fn loopback_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        server.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        (client, server)
+    }
+
+    #[test]
+    fn read_request_survives_split_headers_and_keeps_the_tail() {
+        let (mut client, mut server) = loopback_pair();
+        client
+            .write_all(b"POST /v1/chat HTTP/1.1\r\nHost: x\r\ncontent-len")
+            .unwrap();
+        client.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        client
+            .write_all(b"gth: 5\r\n\r\nhelloGET /health HTTP/1.1\r\n\r\n")
+            .unwrap();
+        client.flush().unwrap();
+
+        let mut buf = Vec::new();
+        let request = read_request(&mut server, &mut buf).unwrap().unwrap();
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/v1/chat");
+        assert_eq!(request.body.as_slice(), b"hello".as_slice());
+        assert_eq!(buf.as_slice(), b"GET /health HTTP/1.1\r\n\r\n".as_slice());
+
+        let request = read_request(&mut server, &mut buf).unwrap().unwrap();
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/health");
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn read_request_decodes_a_chunked_body() {
+        let (mut client, mut server) = loopback_pair();
+        client
+            .write_all(
+                b"POST /v1/chat HTTP/1.1\r\nHost: x\r\ntransfer-encoding: chunked\r\n\r\n\
+                  5\r\nhello\r\n0\r\n\r\n",
+            )
+            .unwrap();
+        client.flush().unwrap();
+
+        let mut buf = Vec::new();
+        let request = read_request(&mut server, &mut buf).unwrap().unwrap();
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.body.as_slice(), b"hello".as_slice());
+        assert!(buf.is_empty());
     }
 }
