@@ -72,7 +72,7 @@ build), or the hash will not match. Profile it with `valgrind --tool=callgrind
 the file name, is what makes the profile trustworthy.
 
 The v0.1.0 vs v0.1.1 comparison chart is
-[`profile-v0.1.0-vs-v0.1.1.png`](profile-v0.1.0-vs-v0.1.1.png).
+[`images/profile-v0.1.0-vs-v0.1.1.png`](images/profile-v0.1.0-vs-v0.1.1.png).
 
 ## Commands
 

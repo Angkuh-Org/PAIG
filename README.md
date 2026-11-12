@@ -92,7 +92,7 @@ Background control (`paig.pid` and `paig.log` live in `~/.paig/`):
 v0.1.1 cuts per-request JSON/SSE work without changing the wire format.
 Callgrind on hash-verified release twins, same synthetic workload:
 
-![PAIG v0.1.0 vs v0.1.1 benchmark](docs/profile-v0.1.0-vs-v0.1.1.png)
+![PAIG v0.1.0 vs v0.1.1 benchmark](docs/images/profile-v0.1.0-vs-v0.1.1.png)
 
 - streaming: 78% fewer instructions, 4.51× less CPU work
 - non-streaming: 47% fewer instructions, 1.90× less CPU work
