@@ -110,7 +110,7 @@ every `/v1/models` request: the cache is shared behind `Arc`, lookups borrow
 `provider`/`id` instead of formatting a key, and only the five routed providers
 are converted. Callgrind on the same 264-model workload:
 
-![PAIG v0.2.0 pre-optimization vs v0.2.0-rc1 benchmark](docs/images/profile-v0.2.0-pre-vs-rc1.png)
+![PAIG v0.2.0 pre-optimization vs release benchmark](docs/images/profile-v0.2.0-pre-vs-release.png)
 
 - warm `/v1/models`: 49% fewer instructions, 1.97× less CPU work
 - cold `/v1/models` (6 MB catalogue parse): 4.7% fewer instructions, 1.05× less

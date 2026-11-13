@@ -74,7 +74,7 @@ the file name, is what makes the profile trustworthy.
 The v0.1.0 vs v0.1.1 comparison chart is
 [`images/profile-v0.1.0-vs-v0.1.1.png`](images/profile-v0.1.0-vs-v0.1.1.png).
 The v0.2.0 models.dev capability-path chart is
-[`images/profile-v0.2.0-pre-vs-rc1.png`](images/profile-v0.2.0-pre-vs-rc1.png).
+[`images/profile-v0.2.0-pre-vs-release.png`](images/profile-v0.2.0-pre-vs-release.png).
 
 ## Commands
 
