@@ -109,29 +109,6 @@ fn text_of(content: &Value) -> String {
     }
 }
 
-fn content_text(content: &Value) -> String {
-    match content {
-        Value::Str(text) => text.clone(),
-        Value::Array(items) => {
-            let mut out = String::new();
-            for item in items {
-                match item {
-                    Value::Str(text) => out.push_str(text),
-                    Value::Object(_) => {
-                        if let Some(text) = item.get("text").and_then(Value::as_str) {
-                            out.push_str(text);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            out
-        }
-        Value::Null => String::new(),
-        other => other.stringify(),
-    }
-}
-
 fn image_part(input: &Value) -> Option<Value> {
     let source = input
         .get("image_url")
@@ -568,14 +545,6 @@ pub fn handle(body: &Value, res: &mut Response, config: &Config, client: &HttpCl
             .map_err(|error| error.to_string());
     }
 
-    let mut owned = None;
-    let advisor_max = config.advisor_max_bytes.max(0) as usize;
-    if oversized_user_payload(body, advisor_max) {
-        let mut copy = body.clone();
-        trim_advisor_payload(&mut copy, advisor_max);
-        owned = Some(copy);
-    }
-    let body = owned.as_ref().unwrap_or(body);
     let cc_body = build_cc_request(body);
     let thread_id = cc_body
         .get("threadId")
@@ -751,105 +720,6 @@ fn fetch_with_retries(
         }
     }
     Err(format!("Cannot reach Command Code: {last_error}"))
-}
-
-fn oversized_user_payload(body: &Value, max: usize) -> bool {
-    if max == 0 {
-        return false;
-    }
-    body.get("messages")
-        .and_then(Value::as_array)
-        .map(|messages| {
-            messages.iter().any(|message| {
-                message.get("role").and_then(Value::as_str) == Some("user")
-                    && content_text(message.get("content").unwrap_or(&Value::Null)).len() > max
-            })
-        })
-        .unwrap_or(false)
-}
-
-fn trim_advisor_payload(body: &mut Value, max: usize) {
-    if max == 0 {
-        return;
-    }
-    let Some(Value::Array(messages)) = body.get_mut("messages") else {
-        return;
-    };
-    let mut target = None;
-    for (index, message) in messages.iter().enumerate() {
-        if message.get("role").and_then(Value::as_str) != Some("user") {
-            continue;
-        }
-        let text = content_text(message.get("content").unwrap_or(&Value::Null));
-        if text.len() > max {
-            target = Some((index, text));
-            break;
-        }
-    }
-    let Some((index, text)) = target else { return };
-    let Some(start) = text.find('{') else { return };
-    let Some(end) = text.rfind('}') else { return };
-    if end <= start {
-        return;
-    }
-    let Ok(mut parsed) = Value::parse_str(&text[start..=end]) else {
-        logw!("advisor payload {} bytes but no JSON transcript; not trimmed", text.len());
-        return;
-    };
-    let initial_entries = parsed
-        .get("transcript")
-        .and_then(Value::as_array)
-        .map(|v| v.len())
-        .unwrap_or(0);
-    if initial_entries == 0 {
-        return;
-    }
-    let original = text.len();
-    loop {
-        let len = parsed
-            .get("transcript")
-            .and_then(Value::as_array)
-            .map(|v| v.len())
-            .unwrap_or(0);
-        if len <= 1 || parsed.stringify().len() <= max {
-            break;
-        }
-        if let Some(Value::Array(transcript)) = parsed.get_mut("transcript") {
-            transcript.remove(0);
-        } else {
-            break;
-        }
-    }
-    let entries = parsed
-        .get("transcript")
-        .and_then(Value::as_array)
-        .map(|v| v.len())
-        .unwrap_or(0);
-    let note = format!(
-        "\n\n[PAIG] Transcript truncated to the most recent {entries} entries to fit the upstream request budget."
-    );
-    let existing = parsed
-        .get("executorSystemInstruction")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    parsed.insert(
-        "executorSystemInstruction",
-        Value::string(format!("{existing}{note}")),
-    );
-    let next = format!("{}{}{}", &text[..start], parsed.stringify(), &text[end + 1..]);
-    if next.len() >= original {
-        return;
-    }
-    if let Some(message) = messages.get_mut(index) {
-        message.insert("content", Value::string(next.clone()));
-    }
-    logi!(
-        "advisor transcript trimmed {} -> {} bytes ({} entries)",
-        original,
-        next.len(),
-        entries
-    );
 }
 
 fn upstream_error(text: &[u8], status: u16) -> (String, Option<String>) {
@@ -1535,38 +1405,6 @@ mod tests {
             build_cc_request(&d).get("threadId").unwrap().as_str(),
             Some("fixed-thread")
         );
-    }
-
-    #[test]
-    fn advisor_payload_is_trimmed() {
-        let mut transcript = Vec::new();
-        for index in 0..6 {
-            let mut entry = Value::obj();
-            entry.insert("n", Value::Int(index));
-            entry.insert("text", Value::string("x".repeat(80)));
-            transcript.push(entry);
-        }
-        let mut payload = Value::obj();
-        payload.insert("transcript", Value::Array(transcript));
-        payload.insert("executorSystemInstruction", Value::string("base"));
-        let text = format!("prefix-{}-{}", payload.stringify(), "-suffix");
-        let mut body = Value::obj();
-        let mut message = Value::obj();
-        message.insert("role", Value::string("user"));
-        message.insert("content", Value::string(text));
-        body.insert("messages", Value::Array(vec![message]));
-        trim_advisor_payload(&mut body, 220);
-        let content = body
-            .get("messages")
-            .unwrap()
-            .as_array()
-            .unwrap()[0]
-            .get("content")
-            .unwrap()
-            .as_str()
-            .unwrap();
-        assert!(content.contains("[PAIG]"));
-        assert!(content.len() < 600);
     }
 
     #[test]

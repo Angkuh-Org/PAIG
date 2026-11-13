@@ -79,6 +79,10 @@ cat > "$TMP/config.json" <<EOF
     "baseUrl": "http://127.0.0.1:$MOCK_PORT/v1",
     "apiKey": "dummy",
     "models": ["mistral-model"]
+  },
+  "modelsDev": {
+    "url": "http://127.0.0.1:$MOCK_PORT/models-dev.json",
+    "blocking": true
   }
 }
 EOF
@@ -109,6 +113,38 @@ if echo "$models" | grep -q '"id":"test-model"'; then fail "bare CC model still 
 echo "$models" | grep -q '"opencode/beam-free"' || fail "models missing OpenCode model"
 echo "$models" | grep -q '"bob/bob-model"' || fail "models missing Bob model"
 echo "$models" | grep -q '"mistral/mistral-model"' || fail "models missing Mistral model"
+printf '%s' "$models" | python3 -c '
+import json, sys
+by_id = {model["id"]: model for model in json.load(sys.stdin)["data"]}
+cc = by_id["cc/test-model"]["capabilities"]
+assert cc["context_window"] == 1000000, cc
+assert cc["max_output_tokens"] == 128000, cc
+assert cc["supports_function_calling"] is True, cc
+assert cc["supports_reasoning"] is True, cc
+assert cc["supports_vision"] is True, cc
+assert cc["estimated"] is True, cc
+assert abs(cc["input_cost_per_token"] - 0.000003) < 1e-12, cc
+bob = by_id["bob/bob-model"]["capabilities"]
+assert "estimated" not in bob, bob
+assert bob["context_window"] == 131072, bob
+assert bob["max_output_tokens"] == 65536, bob
+assert bob["supports_vision"] is True, bob
+assert bob["supports_prompt_caching"] is False, bob
+assert bob["output_cost_per_token"] == 0.000002, bob
+mistral = by_id["mistral/mistral-model"]["capabilities"]
+assert mistral["context_window"] == 256000, mistral
+assert mistral["max_output_tokens"] == 64000, mistral
+assert mistral["supports_function_calling"] is True, mistral
+assert mistral["supports_vision"] is True, mistral
+assert mistral["supports_reasoning"] is False, mistral
+for model_id in ("opencode/beam-free", "opencode-go/beam-free"):
+    caps = by_id[model_id]["capabilities"]
+    assert caps["context_window"] == 1048576, (model_id, caps)
+    assert caps["max_output_tokens"] == 131072, (model_id, caps)
+    assert caps["supports_function_calling"] is True, (model_id, caps)
+    assert caps["supports_reasoning"] is True, (model_id, caps)
+    assert caps["supports_vision"] is False, (model_id, caps)
+' || fail "model capabilities missing or wrong"
 
 stream=$(curl -fsS -N --max-time 10 -H 'content-type: application/json' \
     -d '{"model":"cc/test-model","messages":[{"role":"user","content":"hi"}],"stream":true}' \

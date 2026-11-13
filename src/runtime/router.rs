@@ -193,6 +193,17 @@ impl App {
                                                             .unwrap_or("command-code"),
                                                     ),
                                                 );
+                                                let mut caps = Value::obj();
+                                                crate::backend::cap_int(
+                                                    model,
+                                                    "context_length",
+                                                    &mut caps,
+                                                    "context_window",
+                                                );
+                                                crate::backend::attach_caps(
+                                                    &mut entry,
+                                                    caps,
+                                                );
                                                 Some(entry)
                                             })
                                             .collect();
@@ -237,6 +248,27 @@ impl App {
             } else {
                 by_id.insert(id, deduped.len());
                 deduped.push(model);
+            }
+        }
+        if let Some(catalogue) =
+            crate::backend::models_dev::catalogue(&self.config, &self.client)
+        {
+            for model in &mut deduped {
+                let Some((prefix, bare)) = model
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| id.split_once('/'))
+                else {
+                    continue;
+                };
+                let Some(provider) = crate::backend::models_dev::provider_for(prefix) else {
+                    continue;
+                };
+                let Some(md) = crate::backend::models_dev::lookup(&catalogue, provider, bare)
+                else {
+                    continue;
+                };
+                crate::backend::models_dev::enrich_model(model, md);
             }
         }
         let mut root = Value::obj();

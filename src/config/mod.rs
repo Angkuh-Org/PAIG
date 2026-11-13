@@ -133,16 +133,22 @@ pub struct MistralConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct ModelsDevConfig {
+    pub url: String,
+    pub blocking: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub server: ServerConfig,
     pub debug: bool,
-    pub advisor_max_bytes: i64,
     pub ledger_path: String,
     pub command_code: CommandCodeConfig,
     pub opencode: OpencodeConfig,
     pub kilo: KiloConfig,
     pub bob: BobConfig,
     pub mistral: MistralConfig,
+    pub models_dev: ModelsDevConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -167,9 +173,6 @@ impl Config {
                 port: crate::rules::DEFAULT_PORT,
             },
             debug: false,
-            // TODO(paig): diagnose z-ai/glm-5.3-flashx failing around 1.9 MiB;
-            // 1 MB is a safety margin, not a measured limit.
-            advisor_max_bytes: 1_000_000,
             ledger_path: ledger_path.to_string_lossy().to_string(),
             command_code: CommandCodeConfig {
                 base_url: "https://api.commandcode.ai".to_string(),
@@ -215,6 +218,10 @@ impl Config {
                 api_key_file: String::new(),
                 models: None,
             },
+            models_dev: ModelsDevConfig {
+                url: "https://models.dev/api.json".to_string(),
+                blocking: false,
+            },
         }
     }
 
@@ -226,7 +233,6 @@ impl Config {
         root.insert("server", server);
 
         root.insert("debug", Value::Bool(self.debug));
-        root.insert("advisorMaxBytes", Value::Int(self.advisor_max_bytes));
         root.insert("ledgerPath", Value::string(&self.ledger_path));
 
         let mut cc = Value::obj();
@@ -291,6 +297,11 @@ impl Config {
         mistral.insert("models", option_list_to_value(&self.mistral.models));
         root.insert("mistral", mistral);
 
+        let mut models_dev = Value::obj();
+        models_dev.insert("url", Value::string(&self.models_dev.url));
+        models_dev.insert("blocking", Value::Bool(self.models_dev.blocking));
+        root.insert("modelsDev", models_dev);
+
         root
     }
 }
@@ -316,7 +327,6 @@ const ENV_MAP: &[EnvSpec] = &[
     EnvSpec { name: "PAIG_HOST", dotted: "server.host", kind: "string" },
     EnvSpec { name: "PAIG_PORT", dotted: "server.port", kind: "integer" },
     EnvSpec { name: "PAIG_DEBUG", dotted: "debug", kind: "boolean" },
-    EnvSpec { name: "PAIG_ADVISOR_MAX_BYTES", dotted: "advisorMaxBytes", kind: "integer" },
     EnvSpec { name: "PAIG_LEDGER", dotted: "ledgerPath", kind: "string" },
     EnvSpec { name: "CC_API_KEY", dotted: "commandCode.apiKey", kind: "string" },
     EnvSpec { name: "PAIG_CC_API_KEY", dotted: "commandCode.apiKey", kind: "string" },
@@ -550,7 +560,6 @@ fn normalize(config: &mut Value, cwd: &Path, base: &Config, warnings: &mut Vec<S
         0
     };
     out.debug = bool_at(config, "debug", false);
-    out.advisor_max_bytes = int_at(config, "advisorMaxBytes", 1_000_000);
     let ledger = string_at(config, "ledgerPath", "");
     out.ledger_path = if ledger.is_empty() {
         util::paig_home()
@@ -667,6 +676,13 @@ fn normalize(config: &mut Value, cwd: &Path, base: &Config, warnings: &mut Vec<S
         "mistral.models",
         warnings,
     );
+
+    out.models_dev.url = string_exact_at(
+        config,
+        "modelsDev.url",
+        "https://models.dev/api.json",
+    );
+    out.models_dev.blocking = bool_at(config, "modelsDev.blocking", false);
 
     out
 }
@@ -1104,9 +1120,6 @@ pub fn validate_config(config: &Config) -> (Vec<String>, Vec<String>) {
     }
     if config.server.port == 0 {
         errors.push(format!("server.port must be an integer from 1 to 65535 (got {})", config.server.port));
-    }
-    if config.advisor_max_bytes < 0 {
-        errors.push("advisorMaxBytes must be a non-negative integer".to_string());
     }
     if !(0..=10).contains(&config.command_code.fetch_retries) {
         errors.push("commandCode.fetchRetries must be an integer from 0 to 10".to_string());
@@ -1714,21 +1727,30 @@ mod tests {
     }
 
     #[test]
+    fn empty_models_dev_url_disables_the_fallback() {
+        let mut warnings = Vec::new();
+        let mut config = Value::parse_str(r#"{"modelsDev":{"url":""}}"#).unwrap();
+        let parsed = normalize(&mut config, Path::new("."), &Config::defaults(), &mut warnings);
+        assert_eq!(parsed.models_dev.url, "");
+
+        let mut config = Value::parse_str("{}").unwrap();
+        let parsed = normalize(&mut config, Path::new("."), &Config::defaults(), &mut warnings);
+        assert_eq!(parsed.models_dev.url, "https://models.dev/api.json");
+    }
+
+    #[test]
     fn negative_numbers_are_rejected() {
         let mut config = Config::defaults();
-        config.advisor_max_bytes = -1;
         config.command_code.fetch_retries = -1;
         config.command_code.fetch_backoff_ms = -1;
         config.opencode.timeout_ms = 0;
         let (errors, _) = validate_config(&config);
-        assert!(errors.iter().any(|error| error.contains("advisorMaxBytes")));
         assert!(errors.iter().any(|error| error.contains("fetchRetries")));
         assert!(errors.iter().any(|error| error.contains("fetchBackoffMs")));
         assert!(errors.iter().any(|error| error.contains("timeoutMs")));
 
         config.command_code.fetch_retries = 11;
         config.command_code.fetch_backoff_ms = 60_001;
-        config.advisor_max_bytes = 1;
         config.opencode.timeout_ms = 1;
         let (errors, _) = validate_config(&config);
         assert!(errors.iter().any(|error| error.contains("fetchRetries")));
