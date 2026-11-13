@@ -251,6 +251,32 @@ fn cached_models(scope: &str, ttl: Duration) -> Option<Vec<Value>> {
     None
 }
 
+fn bob_caps(info: &Value) -> Value {
+    let mut caps = Value::obj();
+    crate::backend::cap_int(info, "max_input_tokens", &mut caps, "context_window");
+    crate::backend::cap_int(info, "max_output_tokens", &mut caps, "max_output_tokens");
+    crate::backend::cap_bool(info, "supports_vision", &mut caps, "supports_vision");
+    crate::backend::cap_bool(
+        info,
+        "supports_prompt_caching",
+        &mut caps,
+        "supports_prompt_caching",
+    );
+    crate::backend::cap_f64(
+        info,
+        "input_cost_per_token",
+        &mut caps,
+        "input_cost_per_token",
+    );
+    crate::backend::cap_f64(
+        info,
+        "output_cost_per_token",
+        &mut caps,
+        "output_cost_per_token",
+    );
+    caps
+}
+
 fn fetch_models(
     base: &str,
     config: &Config,
@@ -288,6 +314,9 @@ fn fetch_models(
         entry.insert("object", Value::string("model"));
         entry.insert("created", Value::Int(created));
         entry.insert("owned_by", Value::string("bob"));
+        if let Some(info) = model.get("model_info") {
+            crate::backend::attach_caps(&mut entry, bob_caps(info));
+        }
         list.push(entry);
     }
     if list.is_empty() {
@@ -325,5 +354,30 @@ mod tests {
             .find(|(name, _)| name == "authorization")
             .map(|(_, value)| value.as_str());
         assert_eq!(auth, Some("apikey secret"));
+    }
+
+    #[test]
+    fn caps_keep_only_reported_fields() {
+        let info = Value::parse_str(
+            r#"{"max_input_tokens":131072,"max_output_tokens":65536,
+                "supports_vision":true,"input_cost_per_token":0,
+                "output_cost_per_token":0.000002}"#,
+        )
+        .unwrap();
+        let caps = bob_caps(&info);
+        assert_eq!(caps.get("context_window").unwrap().as_i64(), Some(131072));
+        assert_eq!(
+            caps.get("max_output_tokens").unwrap().as_i64(),
+            Some(65536)
+        );
+        assert_eq!(
+            caps.get("supports_vision").unwrap().as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            caps.get("output_cost_per_token").unwrap().as_f64(),
+            Some(0.000002)
+        );
+        assert!(caps.get("supports_prompt_caching").is_none());
     }
 }

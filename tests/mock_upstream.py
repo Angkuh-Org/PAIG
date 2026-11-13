@@ -35,12 +35,98 @@ OPENAI_JSON = json.dumps({
 
 MODELS = json.dumps({
     "object": "list",
-    "data": [{"id": "test-model", "object": "model", "created": 1, "owned_by": "mock"}],
+    "data": [
+        {
+            "id": "test-model",
+            "object": "model",
+            "created": 1,
+            "owned_by": "mock",
+            "context_length": 1000000,
+        }
+    ],
+}).encode()
+
+MISTRAL_MODELS = json.dumps({
+    "object": "list",
+    "data": [
+        {
+            "id": "mistral-model",
+            "object": "model",
+            "created": 1,
+            "owned_by": "mistralai",
+            "max_context_length": 256000,
+            "capabilities": {
+                "completion_chat": True,
+                "function_calling": True,
+                "vision": True,
+                "reasoning": False,
+            },
+        }
+    ],
+}).encode()
+
+MODELS_DEV = json.dumps({
+    "commandcode": {
+        "models": {
+            "test-model": {
+                "limit": {"context": 999, "output": 128000},
+                "tool_call": True,
+                "reasoning": True,
+                "vision": None,
+                "modalities": {"input": ["text", "image"]},
+                "cost": {"input": 3, "output": 15},
+            }
+        }
+    },
+    "opencode": {
+        "models": {
+            "beam-free": {
+                "limit": {"context": 1048576, "output": 131072},
+                "tool_call": True,
+                "reasoning": True,
+                "modalities": {"input": ["text"]},
+                "cost": {"input": 0, "output": 0},
+            }
+        }
+    },
+    "opencode-go": {
+        "models": {
+            "beam-free": {
+                "limit": {"context": 1048576, "output": 131072},
+                "tool_call": True,
+                "reasoning": True,
+                "modalities": {"input": ["text"]},
+                "cost": {"input": 0, "output": 0},
+            }
+        }
+    },
+    "mistral": {
+        "models": {
+            "mistral-model": {
+                "limit": {"context": 999, "output": 64000},
+                "tool_call": True,
+                "reasoning": False,
+                "cost": {"input": 0, "output": 0},
+            }
+        }
+    },
 }).encode()
 
 BOB_MODELS = json.dumps({
     "object": "list",
-    "data": [{"model_name": "bob-model"}],
+    "data": [
+        {
+            "model_name": "bob-model",
+            "model_info": {
+                "max_input_tokens": 131072,
+                "max_output_tokens": 65536,
+                "supports_vision": True,
+                "supports_prompt_caching": False,
+                "input_cost_per_token": 0,
+                "output_cost_per_token": 0.000002,
+            },
+        }
+    ],
 }).encode()
 
 BOB_PROFILE = json.dumps({
@@ -95,14 +181,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_body(404, "application/json", b'{"error":{"message":"not found"}}')
 
     def do_GET(self):
+        if self.path == "/models-dev.json":
+            self.send_body(200, "application/json", MODELS_DEV)
+            return
         if self.path.endswith("/model/info"):
             self.send_body(200, "application/json", BOB_MODELS)
             return
         if self.path.endswith("/admin/v1/profile"):
             self.send_body(200, "application/json", BOB_PROFILE)
             return
-        if self.path.endswith("/provider/v1/models") or self.path.endswith("/models"):
+        if self.path.endswith("/provider/v1/models"):
             self.send_body(200, "application/json", MODELS)
+            return
+        if self.path.endswith("/models"):
+            if self.headers.get("authorization"):
+                self.send_body(200, "application/json", MISTRAL_MODELS)
+            else:
+                self.send_body(200, "application/json", MODELS)
             return
         self.send_body(404, "application/json", b'{"error":{"message":"not found"}}')
 

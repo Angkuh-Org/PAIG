@@ -4,7 +4,6 @@
     "port": 8899
   },
   "debug": false,
-  "advisorMaxBytes": 1000000,
   "ledgerPath": "",
   "commandCode": {
     "baseUrl": "https://api.commandcode.ai",
@@ -49,5 +48,9 @@
     "apiKey": "",
     "apiKeyFile": "~/.paig/mistral.key",
     "models": null
+  },
+  "modelsDev": {
+    "url": "https://models.dev/api.json",
+    "blocking": false
   }
 }

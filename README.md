@@ -103,6 +103,20 @@ Callgrind on hash-verified release twins, same synthetic workload:
 These are loopback instruction-count ratios, not wall-clock latency. Method and
 profiling recipe: [`docs/build.md`](docs/build.md#profiling).
 
+### v0.2.0 model catalogue
+
+The capability path no longer clones the 9,136-entry models.dev catalogue on
+every `/v1/models` request: the cache is shared behind `Arc`, lookups borrow
+`provider`/`id` instead of formatting a key, and only the five routed providers
+are converted. Callgrind on the same 264-model workload:
+
+![PAIG v0.2.0 pre-optimization vs v0.2.0-rc1 benchmark](docs/images/profile-v0.2.0-pre-vs-rc1.png)
+
+- warm `/v1/models`: 49% fewer instructions, 1.97× less CPU work
+- cold `/v1/models` (6 MB catalogue parse): 4.7% fewer instructions, 1.05× less
+- `aggregate_sse` static disassembly: 7.3% fewer instructions, 30% fewer stack refs
+- release binary: 1,297,720 → 1,300,080 B, still under the 1.5 MiB gate
+
 ## Model routing
 
 The model prefix selects the backend; the prefix is stripped before the
@@ -111,7 +125,7 @@ with HTTP 400 (`model_unrouted`); there is no default backend.
 
 | Model id | Backend | Credential |
 | --- | --- | --- |
-| `opencode/<id>`, `oc/<id>` (also `opencode:<id>`) | OpenCode free | none; uses the public key literal |
+| `opencode/<id>`, `oc/<id>` (also `opencode:<id>`) | OpenCode free | none; the `opencode` CLI mints the session |
 | `opencode-go/<id>` | OpenCode Go | `OPENCODE_API_KEY` / `OPENCODE_API_KEY_FILE` / `opencode auth export` |
 | `kilo/<id>`, `kilocode/<id>` | Kilo | `KILO_API_KEY` |
 | `bob/<id>` | IBM Bob | `PAIG_BOB_API_KEY` / `PAIG_BOB_API_KEY_FILE` |
@@ -195,7 +209,6 @@ Passthrough backends preserve unknown request fields.
 | `PAIG_HOST` | `127.0.0.1` | Bind address (G6: loopback by default) |
 | `PAIG_PORT` | `8899` | Bind port, 1-65535 |
 | `PAIG_DEBUG` | `0` | Verbose request logging |
-| `PAIG_ADVISOR_MAX_BYTES` | `1000000` | Trim oversized advisor transcripts |
 | `PAIG_LEDGER` | `~/.paig/paig-ledger.jsonl` | JSONL usage ledger, mode `0600` |
 | `CC_API_KEY` | empty | Command Code key; required for `cc/` and `commandcode/` models |
 | `CC_API_KEY_FILE` | empty | JSON or plain-text key file |
@@ -209,7 +222,7 @@ Passthrough backends preserve unknown request fields.
 | `CC_TASTE_LEARNING` | `true` | `x-taste-learning` header |
 | `OPENCODE_API_KEY` | empty | OpenCode Go credential |
 | `OPENCODE_API_KEY_FILE` | empty | OpenCode key file |
-| `OPENCODE_BIN` | empty | CLI used for `auth export`; falls back to `~/.opencode/bin/opencode` |
+| `OPENCODE_BIN` | empty | Required for `opencode/*` free models (session mint) and used for `auth export`; falls back to `~/.opencode/bin/opencode` |
 | `OPENCODE_MODELS` | built-in free list | Comma list of free model ids |
 | `OPENCODE_GO_MODELS` | built-in Go list | Comma list of Go model ids |
 | `OPENCODE_TIMEOUT_MS` | `180000` | OpenCode upstream timeout |
@@ -224,6 +237,18 @@ Passthrough backends preserve unknown request fields.
 | `PAIG_MISTRAL_MODELS` | unset | Curated ids; unset lists every chat model |
 | `PAIG_CONFIG` | unset | Use one config file instead of discovery |
 | `PAIG_ENV_FILE` | unset | Use one env file instead of discovery |
+
+## Model capabilities
+
+Every `/v1/models` entry carries a `capabilities` object built from the backend's own
+metadata (Bob `model_info`, Mistral `capabilities`, Kilo modalities/parameters, Command Code
+`context_length`). Fields a backend does not report are filled from
+[models.dev](https://models.dev) as estimates; upstream values always win. The models.dev
+catalogue refreshes in the background and is cached at `~/.paig/models-dev.json` for 24 hours,
+so a cold request is not blocked by the download.
+
+Set `modelsDev.url` to `""` in `config.json` to disable the fallback and the outbound request.
+`modelsDev.blocking` is a test-only switch.
 
 ## CLI
 

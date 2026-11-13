@@ -468,15 +468,54 @@ fn model_object(id: &str, created: i64) -> Value {
     model
 }
 
-pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
-    if let Some(models) = config.mistral.models.as_ref().filter(|list| !list.is_empty()) {
-        let created = crate::util::now_unix() as i64;
-        return models
-            .iter()
-            .filter(|id| !id.is_empty())
-            .map(|id| model_object(id, created))
-            .collect();
+fn mistral_caps(model: &Value) -> Value {
+    let mut caps = Value::obj();
+    crate::backend::cap_int(model, "max_context_length", &mut caps, "context_window");
+    if let Some(features) = model.get("capabilities") {
+        crate::backend::cap_bool(
+            features,
+            "function_calling",
+            &mut caps,
+            "supports_function_calling",
+        );
+        crate::backend::cap_bool(features, "vision", &mut caps, "supports_vision");
+        crate::backend::cap_bool(features, "reasoning", &mut caps, "supports_reasoning");
     }
+    caps
+}
+
+pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
+    let live = live_models(config, client);
+    let Some(configured) = config
+        .mistral
+        .models
+        .as_ref()
+        .filter(|list| !list.is_empty())
+    else {
+        return live;
+    };
+    configured_models(&live, configured, crate::util::now_unix() as i64)
+}
+
+fn configured_models(live: &[Value], configured: &[String], created: i64) -> Vec<Value> {
+    let mut out = Vec::with_capacity(configured.len());
+    for id in configured {
+        let id = id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        let wanted = format!("mistral/{id}");
+        let entry = live
+            .iter()
+            .find(|model| model.get("id").and_then(Value::as_str) == Some(wanted.as_str()))
+            .cloned()
+            .unwrap_or_else(|| model_object(id, created));
+        out.push(entry);
+    }
+    out
+}
+
+fn live_models(config: &Config, client: &HttpClient) -> Vec<Value> {
     let cache = CACHE.get_or_init(|| Mutex::new(None));
     let cached = cache.lock().ok().and_then(|guard| guard.clone());
     if let Some((at, list)) = &cached {
@@ -513,7 +552,8 @@ pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
         Ok(value) => value,
         Err(_) => return stale,
     };
-    let ids: Vec<&str> = value
+    let created = crate::util::now_unix() as i64;
+    let list: Vec<Value> = value
         .get("data")
         .and_then(Value::as_array)
         .map(|data| {
@@ -526,19 +566,21 @@ pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
                         .and_then(Value::as_bool)
                         == Some(true)
                 })
-                .filter_map(|model| model.get("id").and_then(Value::as_str))
-                .filter(|id| !id.is_empty())
+                .filter_map(|model| {
+                    let id = model
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())?;
+                    let mut entry = model_object(id, created);
+                    crate::backend::attach_caps(&mut entry, mistral_caps(model));
+                    Some(entry)
+                })
                 .collect()
         })
         .unwrap_or_default();
-    if ids.is_empty() {
+    if list.is_empty() {
         return stale;
     }
-    let created = crate::util::now_unix() as i64;
-    let list: Vec<Value> = ids
-        .into_iter()
-        .map(|id| model_object(id, created))
-        .collect();
     if let Ok(mut guard) = cache.lock() {
         *guard = Some((Instant::now(), list.clone()));
     }
@@ -554,6 +596,50 @@ mod tests {
         assert_eq!(mistral_model_id("mistral/mistral-large-4").unwrap(), "mistral-large-4");
         assert!(mistral_model_id("mistral/").is_none());
         assert!(mistral_model_id("kilo/x").is_none());
+    }
+
+    #[test]
+    fn caps_normalize_mistral_metadata() {
+        let model = Value::parse_str(
+            r#"{"max_context_length":256000,
+                "capabilities":{"completion_chat":true,"function_calling":true,
+                                "vision":false,"reasoning":true}}"#,
+        )
+        .unwrap();
+        let caps = mistral_caps(&model);
+        assert_eq!(caps.get("context_window").unwrap().as_i64(), Some(256000));
+        assert_eq!(
+            caps.get("supports_function_calling").unwrap().as_bool(),
+            Some(true)
+        );
+        assert_eq!(caps.get("supports_vision").unwrap().as_bool(), Some(false));
+        assert_eq!(
+            caps.get("supports_reasoning").unwrap().as_bool(),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn configured_list_keeps_live_capabilities() {
+        let live = vec![Value::parse_str(
+            r#"{"id":"mistral/mistral-large-4","object":"model",
+                "capabilities":{"context_window":256000}}"#,
+        )
+        .unwrap()];
+        let configured = vec![
+            "mistral-large-4".to_string(),
+            "missing-model".to_string(),
+        ];
+        let out = configured_models(&live, &configured, 1);
+        assert_eq!(out.len(), 2);
+        assert_eq!(
+            out[0]
+                .get("capabilities")
+                .and_then(|caps| caps.get("context_window"))
+                .and_then(Value::as_i64),
+            Some(256000)
+        );
+        assert!(out[1].get("capabilities").is_none());
     }
 
     #[test]

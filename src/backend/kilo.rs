@@ -95,6 +95,62 @@ pub fn handle(
     )
 }
 
+fn has_string(list: &[Value], want: &str) -> bool {
+    list.iter().any(|value| value.as_str() == Some(want))
+}
+
+fn kilo_caps(model: &Value) -> Value {
+    let mut caps = Value::obj();
+    crate::backend::cap_int(model, "context_length", &mut caps, "context_window");
+    if let Some(top) = model.get("top_provider") {
+        if caps.get("context_window").is_none() {
+            crate::backend::cap_int(top, "context_length", &mut caps, "context_window");
+        }
+        crate::backend::cap_int(
+            top,
+            "max_completion_tokens",
+            &mut caps,
+            "max_output_tokens",
+        );
+    }
+    if let Some(modalities) = model
+        .get("architecture")
+        .and_then(|arch| arch.get("input_modalities"))
+        .and_then(Value::as_array)
+    {
+        caps.insert(
+            "supports_vision",
+            Value::Bool(has_string(modalities, "image")),
+        );
+    }
+    if let Some(params) = model.get("supported_parameters").and_then(Value::as_array) {
+        caps.insert(
+            "supports_function_calling",
+            Value::Bool(has_string(params, "tools")),
+        );
+        caps.insert(
+            "supports_reasoning",
+            Value::Bool(has_string(params, "reasoning")),
+        );
+    }
+    if let Some(pricing) = model.get("pricing") {
+        for (from, to) in [
+            ("prompt", "input_cost_per_token"),
+            ("completion", "output_cost_per_token"),
+        ] {
+            let cost = pricing
+                .get(from)
+                .and_then(Value::as_str)
+                .and_then(|raw| raw.parse::<f64>().ok())
+                .filter(|cost| *cost >= 0.0);
+            if let Some(cost) = cost {
+                caps.insert(to, Value::Float(cost));
+            }
+        }
+    }
+    caps
+}
+
 pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
     let cache = CACHE.get_or_init(|| Mutex::new(None));
     if let Ok(guard) = cache.lock() {
@@ -105,7 +161,10 @@ pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
         }
     }
 
-    let mut ids: Vec<String> = FALLBACK_FREE.iter().map(|id| id.to_string()).collect();
+    let mut ids: Vec<(String, Value)> = FALLBACK_FREE
+        .iter()
+        .map(|id| (id.to_string(), Value::obj()))
+        .collect();
     let mut headers = Vec::new();
     if !config.kilo.api_key.is_empty() {
         headers.push((
@@ -121,18 +180,16 @@ pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
                 if let Ok(body) = response.read_all() {
                     if let Ok(value) = Value::parse(&body) {
                         if let Some(data) = value.get("data").and_then(Value::as_array) {
-                            let all: Vec<String> = data
+                            let picked: Vec<(String, Value)> = data
                                 .iter()
-                                .filter_map(|model| model.get("id").and_then(Value::as_str))
-                                .map(str::to_string)
+                                .filter_map(|model| {
+                                    let id = model.get("id").and_then(Value::as_str)?;
+                                    if !config.kilo.all_models && !id.ends_with(":free") {
+                                        return None;
+                                    }
+                                    Some((id.to_string(), kilo_caps(model)))
+                                })
                                 .collect();
-                            let picked: Vec<String> = if config.kilo.all_models {
-                                all
-                            } else {
-                                all.into_iter()
-                                    .filter(|id| id.ends_with(":free"))
-                                    .collect()
-                            };
                             if !picked.is_empty() {
                                 ids = picked;
                             }
@@ -146,12 +203,13 @@ pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
     let created = crate::util::now_unix() as i64;
     let list: Vec<Value> = ids
         .into_iter()
-        .map(|id| {
+        .map(|(id, caps)| {
             let mut model = Value::obj();
             model.insert("id", Value::string(format!("kilo/{id}")));
             model.insert("object", Value::string("model"));
             model.insert("created", Value::Int(created));
             model.insert("owned_by", Value::string("kilo"));
+            crate::backend::attach_caps(&mut model, caps);
             model
         })
         .collect();
@@ -159,4 +217,54 @@ pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
         *guard = Some((Instant::now(), list.clone()));
     }
     list
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn caps_normalize_kilo_metadata() {
+        let model = Value::parse_str(
+            r#"{"context_length":256000,
+                "top_provider":{"context_length":256000,"max_completion_tokens":32768},
+                "architecture":{"input_modalities":["text","image"]},
+                "supported_parameters":["max_tokens","tools","reasoning"],
+                "pricing":{"prompt":"0","completion":"0.000002"}}"#,
+        )
+        .unwrap();
+        let caps = kilo_caps(&model);
+        assert_eq!(caps.get("context_window").unwrap().as_i64(), Some(256000));
+        assert_eq!(
+            caps.get("max_output_tokens").unwrap().as_i64(),
+            Some(32768)
+        );
+        assert_eq!(caps.get("supports_vision").unwrap().as_bool(), Some(true));
+        assert_eq!(
+            caps.get("supports_function_calling").unwrap().as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            caps.get("supports_reasoning").unwrap().as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            caps.get("output_cost_per_token").unwrap().as_f64(),
+            Some(0.000002)
+        );
+    }
+
+    #[test]
+    fn caps_skip_variable_pricing() {
+        let model = Value::parse_str(
+            r#"{"pricing":{"prompt":"-1","completion":"0"}}"#,
+        )
+        .unwrap();
+        let caps = kilo_caps(&model);
+        assert!(caps.get("input_cost_per_token").is_none());
+        assert_eq!(
+            caps.get("output_cost_per_token").unwrap().as_f64(),
+            Some(0.0)
+        );
+    }
 }
