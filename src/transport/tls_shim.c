@@ -141,12 +141,13 @@ static int bio_send(void *ctx, const unsigned char *buf, size_t len)
     if (len == 0) {
         return 0;
     }
-    n = send(tls->fd, buf, len, MSG_NOSIGNAL);
+    /* A blocking socket interrupted by a signal has sent nothing; EINTR is a
+     * retry, not a TLS event. */
+    do {
+        n = send(tls->fd, buf, len, MSG_NOSIGNAL);
+    } while (n < 0 && errno == EINTR);
     if (n >= 0) {
         return (int) n;
-    }
-    if (errno == EINTR) {
-        return MBEDTLS_ERR_SSL_WANT_WRITE;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
         return MBEDTLS_ERR_SSL_TIMEOUT;
@@ -162,12 +163,13 @@ static int bio_recv(void *ctx, unsigned char *buf, size_t len)
     if (len == 0) {
         return 0;
     }
-    n = recv(tls->fd, buf, len, 0);
+    /* A blocking socket interrupted by a signal has consumed nothing; EINTR is
+     * a retry, not a TLS event. */
+    do {
+        n = recv(tls->fd, buf, len, 0);
+    } while (n < 0 && errno == EINTR);
     if (n >= 0) {
         return (int) n;
-    }
-    if (errno == EINTR) {
-        return MBEDTLS_ERR_SSL_WANT_READ;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
         return MBEDTLS_ERR_SSL_TIMEOUT;

@@ -13,6 +13,8 @@ TLS_PORT=${PAIG_TLS_PORT:-19443}
 TLS_PAIG_PORT=${PAIG_TLS_PAIG_PORT:-18901}
 TLS_EXPIRED_PORT=${PAIG_TLS_EXPIRED_PORT:-19444}
 TLS_EXPIRED_PAIG_PORT=${PAIG_TLS_EXPIRED_PAIG_PORT:-18904}
+ZEN_MOCK_PORT=${PAIG_ZEN_MOCK_PORT:-19091}
+ZEN_PAIG_PORT=${PAIG_ZEN_PAIG_PORT:-18906}
 TMP=$(mktemp -d /tmp/paig-it.XXXXXX)
 PAIG_PID=
 MOCK_PID=
@@ -20,6 +22,8 @@ TLS_PAIG_PID=
 TLS_PID=
 TLS_EXPIRED_PAIG_PID=
 TLS_EXPIRED_PID=
+ZEN_MOCK_PID=
+ZEN_PAIG_PID=
 FOREIGN_PID=
 DAEMON_HOME=
 cleanup() {
@@ -27,12 +31,16 @@ cleanup() {
         kill "$(cat "$DAEMON_HOME/.paig/paig.pid" 2>/dev/null)" 2>/dev/null || true
     fi
     [ -n "$FOREIGN_PID" ] && kill "$FOREIGN_PID" 2>/dev/null || true
+    [ -n "$ZEN_PAIG_PID" ] && kill "$ZEN_PAIG_PID" 2>/dev/null || true
+    [ -n "$ZEN_MOCK_PID" ] && kill "$ZEN_MOCK_PID" 2>/dev/null || true
     [ -n "$TLS_EXPIRED_PAIG_PID" ] && kill "$TLS_EXPIRED_PAIG_PID" 2>/dev/null || true
     [ -n "$TLS_EXPIRED_PID" ] && kill "$TLS_EXPIRED_PID" 2>/dev/null || true
     [ -n "$TLS_PAIG_PID" ] && kill "$TLS_PAIG_PID" 2>/dev/null || true
     [ -n "$TLS_PID" ] && kill "$TLS_PID" 2>/dev/null || true
     [ -n "$PAIG_PID" ] && kill "$PAIG_PID" 2>/dev/null || true
     [ -n "$MOCK_PID" ] && kill "$MOCK_PID" 2>/dev/null || true
+    [ -n "$ZEN_PAIG_PID" ] && wait "$ZEN_PAIG_PID" 2>/dev/null || true
+    [ -n "$ZEN_MOCK_PID" ] && wait "$ZEN_MOCK_PID" 2>/dev/null || true
     [ -n "$TLS_EXPIRED_PAIG_PID" ] && wait "$TLS_EXPIRED_PAIG_PID" 2>/dev/null || true
     [ -n "$TLS_EXPIRED_PID" ] && wait "$TLS_EXPIRED_PID" 2>/dev/null || true
     [ -n "$TLS_PAIG_PID" ] && wait "$TLS_PAIG_PID" 2>/dev/null || true
@@ -199,10 +207,24 @@ echo "$oc_json" | grep -q '"model":"opencode/beam-free"' || fail "OpenCode model
 grep -q '"model":"opencode/beam-free"' "$TMP/ledger.jsonl" || fail "OpenCode ledger entry"
 
 kilo_json=$(curl -fsS --max-time 10 -H 'content-type: application/json' \
-    -d '{"model":"kilo/some/model:free","messages":[{"role":"user","content":"hi"}]}' \
+    -d '{"model":"kilo-free/some/model:free","messages":[{"role":"user","content":"hi"}]}' \
     "http://127.0.0.1:$PORT/v1/chat/completions")
 echo "$kilo_json" | grep -q '"content":"open"' || fail "Kilo non-stream text"
-echo "$kilo_json" | grep -q '"model":"kilo/some/model:free"' || fail "Kilo model rewrite"
+echo "$kilo_json" | grep -q '"model":"kilo-free/some/model:free"' || fail "Kilo model rewrite"
+
+kilo_status=$(curl -sS -o "$TMP/kilo-keyed.json" -w '%{http_code}' --max-time 10 \
+    -H 'content-type: application/json' \
+    -d '{"model":"kilo/some/model:free","messages":[{"role":"user","content":"hi"}]}' \
+    "http://127.0.0.1:$PORT/v1/chat/completions")
+[ "$kilo_status" = 503 ] || fail "Kilo keyed without a key (got $kilo_status)"
+grep -q 'KILO_API_KEY' "$TMP/kilo-keyed.json" || fail "Kilo keyed error does not name KILO_API_KEY"
+
+kilo_status=$(curl -sS -o "$TMP/kilo-free-paid.json" -w '%{http_code}' --max-time 10 \
+    -H 'content-type: application/json' \
+    -d '{"model":"kilo-free/some/model","messages":[{"role":"user","content":"hi"}]}' \
+    "http://127.0.0.1:$PORT/v1/chat/completions")
+[ "$kilo_status" = 400 ] || fail "Kilo free prefix accepted a paid id (got $kilo_status)"
+grep -q 'kilo_free_model_required' "$TMP/kilo-free-paid.json" || fail "Kilo free-id error code"
 
 bob_json=$(curl -fsS --max-time 10 -H 'content-type: application/json' \
     -d '{"model":"bob/bob-model","messages":[{"role":"user","content":"hi"}]}' \
@@ -343,6 +365,16 @@ wait "$TLS_EXPIRED_PAIG_PID" "$TLS_EXPIRED_PID" 2>/dev/null || true
 TLS_EXPIRED_PAIG_PID=
 TLS_EXPIRED_PID=
 
+# Regression: signals interrupting a blocking recv must be absorbed inside the
+# TLS shim, never surfaced as WANT_READ ("TLS read wants more data").
+"${CC:-cc}" -O2 -DMBEDTLS_CONFIG_FILE='"paig_config.h"' \
+    -I "$ROOT/vendor/mbedtls" -I "$ROOT/vendor/mbedtls/include" \
+    -I "$ROOT/vendor/mbedtls/library" \
+    "$ROOT/tests/tls_shim_eintr.c" "$ROOT/build/mbedtls/libmbedtls.a" \
+    -Wl,--gc-sections -Wl,--as-needed -fuse-ld=lld -lpthread \
+    -o "$TMP/tls-shim-eintr" || fail "cannot build TLS EINTR regression"
+"$TMP/tls-shim-eintr" || fail "TLS shim surfaced an interrupted recv"
+
 # Background lifecycle: the binary owns ~/.paig/pid/log, detachment, and stop.
 DAEMON_PORT=${PAIG_DAEMON_PORT:-18902}
 DAEMON_HOME="$TMP/daemon-home"
@@ -397,5 +429,93 @@ PAIG_CONFIG="$TMP/multi.json" "$ROOT/build/paig" --init \
 for key in cc-key oc-key kilo-key bob-key mistral-key; do
     grep -q "$key" "$TMP/multi.json" || fail "missing imported $key"
 done
+
+# OpenCode free transport is in-process: the same C TLS/HTTP module runs over
+# a socketpair. OPENCODE_BIN points nowhere on purpose; a fallback would fail.
+openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout "$TMP/zen-key.pem" -out "$TMP/zen-cert.pem" \
+    -days 1 -subj '/CN=opencode.ai' -addext 'subjectAltName=DNS:opencode.ai' \
+    >"$TMP/zen-cert.log" 2>&1 || fail "cannot generate zen mock certificate"
+python3 "$ROOT/tests/zen_mock.py" --port "$ZEN_MOCK_PORT" --keep-open \
+    --cert "$TMP/zen-cert.pem" --key "$TMP/zen-key.pem" \
+    >"$TMP/zen-mock.log" 2>&1 &
+ZEN_MOCK_PID=$!
+# The mock has no HTTP health route; wait for its LISTENING line.
+n=0
+while ! grep -q '^LISTENING: ' "$TMP/zen-mock.log" 2>/dev/null; do
+    n=$((n + 1))
+    [ "$n" -ge 500 ] && fail "zen mock did not listen"
+    sleep 0.01
+done
+
+cat > "$TMP/zen-config.json" <<EOF
+{
+  "server": { "host": "127.0.0.1", "port": $ZEN_PAIG_PORT },
+  "debug": false,
+  "ledgerPath": "$TMP/zen-ledger.jsonl",
+  "opencode": {
+    "freeBaseUrl": "https://127.0.0.1:$ZEN_MOCK_PORT/inference/openai/v1"
+  }
+}
+EOF
+
+PAIG_CONFIG="$TMP/zen-config.json" PAIG_ENV_FILE="$TMP/empty.env" PAIG_PORT="$ZEN_PAIG_PORT" \
+    OPENCODE_BIN=/nonexistent \
+    PAIG_ZEN_TEST_FREE=1 PAIG_ZEN_INSECURE=1 PAIG_ZEN_SNI=opencode.ai \
+    "$ROOT/build/paig" >"$TMP/zen-paig.log" 2>&1 &
+ZEN_PAIG_PID=$!
+wait_ready "http://127.0.0.1:$ZEN_PAIG_PORT/health" "$TMP/zen-paig.log"
+
+python3 - "$TMP/zen-request.json" <<'PY'
+import json
+import sys
+
+payload = {
+    "model": "opencode/beam-free",
+    "messages": [{"role": "user", "content": "hi\n" + "x" * 262144}],
+}
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(payload, handle)
+PY
+for i in 1 2 3 4; do
+    curl -sS --max-time 20 -H 'content-type: application/json' \
+        --data-binary @"$TMP/zen-request.json" \
+        "http://127.0.0.1:$ZEN_PAIG_PORT/v1/chat/completions" \
+        >"$TMP/zen-reply-$i.json" &
+    eval "ZEN_CURL_$i=\$!"
+done
+wait "$ZEN_CURL_1" || fail "in-process free reply 1"
+wait "$ZEN_CURL_2" || fail "in-process free reply 2"
+wait "$ZEN_CURL_3" || fail "in-process free reply 3"
+wait "$ZEN_CURL_4" || fail "in-process free reply 4"
+for i in 1 2 3 4; do
+    grep -q '"content":"PONG"' "$TMP/zen-reply-$i.json" || fail "in-process free reply $i"
+    grep -q '"model":"opencode/beam-free"' "$TMP/zen-reply-$i.json" || fail "in-process free model rewrite $i"
+done
+
+python3 - "$TMP/zen-mock.log" <<'PY' || fail "in-process free request checks"
+import json
+import sys
+
+lines = [
+    line for line in open(sys.argv[1], encoding="utf-8")
+    if line.startswith("CHECKS: ")
+]
+if len(lines) != 4:
+    raise SystemExit(f"expected 4 CHECKS lines, got {len(lines)}")
+failed = {}
+for index, line in enumerate(lines, 1):
+    checks = json.loads(line[len("CHECKS: "):])
+    bad = sorted(name for name, ok in checks.items() if not ok)
+    if bad:
+        failed[index] = bad
+if failed:
+    raise SystemExit(f"failed checks: {failed}")
+PY
+
+kill "$ZEN_PAIG_PID" "$ZEN_MOCK_PID" 2>/dev/null || true
+wait "$ZEN_PAIG_PID" "$ZEN_MOCK_PID" 2>/dev/null || true
+ZEN_PAIG_PID=
+ZEN_MOCK_PID=
 
 echo "integration: ok (port $PORT, mock $MOCK_PORT)"

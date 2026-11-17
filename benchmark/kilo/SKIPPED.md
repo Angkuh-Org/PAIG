@@ -1,7 +1,12 @@
 # Kilo — skipped (no credential)
 
+> **2026-11-14 update:** Kilo's `:free` ids are served keyless; PAIG exposes
+> them as `kilo-free/<id>`. The 2026-11-10 run below used the keyed harness and
+> remains a skip. A keyless sweep over `kilo-free/...` has not been run, and the
+> ids below are a historical snapshot, not today's catalogue.
+
 **Status: not measured.** `KILO_API_KEY` is not set, `kilo.apiKey` is empty in
-`~/.paig/config.json`, and no Kilo request can be authenticated.
+`~/.paig/config.json`, and no keyed Kilo request can be authenticated.
 
 The current PAIG catalog still advertises eight `:free` ids:
 
@@ -17,9 +22,15 @@ The current PAIG catalog still advertises eight `:free` ids:
 They are listed here only to record the catalog snapshot. No correctness,
 stability, or latency number was produced, so this is a skip, not a result.
 
-To run it later, provide a key and use the same harness:
+To run it later, either use the keyless free prefix or provide a key for the
+keyed prefix:
 
 ```sh
+./build/paig   # keyless
+python3 benchmark/harness/bench.py --tag kilo \
+  --out-dir benchmark/kilo/runs \
+  --models kilo-free/nvidia/nemotron-3.5-super-vl:free ... --no-cwd
+
 KILO_API_KEY=... ./build/paig
 python3 benchmark/harness/bench.py --tag kilo \
   --out-dir benchmark/kilo/runs \

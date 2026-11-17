@@ -1091,6 +1091,7 @@ fn stream_cc(
             Ok(has_line) => has_line,
             Err(error) => {
                 let message = format!("upstream stream error: {error}");
+                logw!("{message}");
                 stream_error_frame(res, &message, Some(502));
                 let _ = res.sse_end();
                 return Ok(());

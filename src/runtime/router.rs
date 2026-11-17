@@ -96,8 +96,8 @@ impl App {
             finish_or_error(res, result);
             return;
         }
-        if let Some(model_id) = kilo::kilo_model_id(&model) {
-            let result = kilo::handle(&body, res, &model_id, &self.config, &self.client);
+        if let Some(target) = kilo::kilo_model_id(&model) {
+            let result = kilo::handle(&body, res, &target, &self.config, &self.client);
             finish_or_error(res, result);
             return;
         }
@@ -117,11 +117,11 @@ impl App {
             return;
         }
         let message = if model.is_empty() {
-            "model is required; use cc/<id>, opencode/<id>, kilo/<id>, bob/<id>, or mistral/<id>"
+            "model is required; use cc/<id>, opencode/<id>, kilo/<id>, kilo-free/<id>, bob/<id>, or mistral/<id>"
                 .to_string()
         } else {
             format!(
-                "Model {model} has no backend prefix; use cc/<id>, opencode/<id>, kilo/<id>, bob/<id>, or mistral/<id>"
+                "Model {model} has no backend prefix; use cc/<id>, opencode/<id>, kilo/<id>, kilo-free/<id>, bob/<id>, or mistral/<id>"
             )
         };
         let _ = res.send_openai_error(

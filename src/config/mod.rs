@@ -17,6 +17,7 @@ pub const DEFAULT_HEADERS: &[(&str, &str)] = &[
     ("x-taste-learning", "true"),
 ];
 
+pub const DEFAULT_OPENCODE_VERSION: &str = "2.3.0";
 pub const DEFAULT_OPENCODE_MODELS: &[&str] = &[
     "beam-free",
     "big-pickle",
@@ -103,6 +104,7 @@ pub struct OpencodeConfig {
     pub api_key: String,
     pub api_key_file: String,
     pub bin: String,
+    pub version: String,
     pub models: Vec<String>,
     pub go_models: Vec<String>,
     pub timeout_ms: i64,
@@ -196,6 +198,7 @@ impl Config {
                 api_key: String::new(),
                 api_key_file: String::new(),
                 bin: String::new(),
+                version: DEFAULT_OPENCODE_VERSION.to_string(),
                 models: DEFAULT_OPENCODE_MODELS.iter().map(|s| s.to_string()).collect(),
                 go_models: DEFAULT_OPENCODE_GO_MODELS.iter().map(|s| s.to_string()).collect(),
                 timeout_ms: 180_000,
@@ -271,6 +274,7 @@ impl Config {
         oc.insert("apiKey", Value::string(&self.opencode.api_key));
         oc.insert("apiKeyFile", Value::string(&self.opencode.api_key_file));
         oc.insert("bin", Value::string(&self.opencode.bin));
+        oc.insert("version", Value::string(&self.opencode.version));
         oc.insert("models", list_to_value(&self.opencode.models));
         oc.insert("goModels", list_to_value(&self.opencode.go_models));
         oc.insert("timeoutMs", Value::Int(self.opencode.timeout_ms));
@@ -345,6 +349,7 @@ const ENV_MAP: &[EnvSpec] = &[
     EnvSpec { name: "OPENCODE_API_KEY", dotted: "opencode.apiKey", kind: "string" },
     EnvSpec { name: "OPENCODE_API_KEY_FILE", dotted: "opencode.apiKeyFile", kind: "string" },
     EnvSpec { name: "OPENCODE_BIN", dotted: "opencode.bin", kind: "string" },
+    EnvSpec { name: "OPENCODE_VERSION", dotted: "opencode.version", kind: "string" },
     EnvSpec { name: "OPENCODE_MODELS", dotted: "opencode.models", kind: "list" },
     EnvSpec { name: "OPENCODE_GO_MODELS", dotted: "opencode.goModels", kind: "list" },
     EnvSpec { name: "OPENCODE_TIMEOUT_MS", dotted: "opencode.timeoutMs", kind: "integer" },
@@ -623,6 +628,12 @@ fn normalize(config: &mut Value, cwd: &Path, base: &Config, warnings: &mut Vec<S
     out.opencode.bin = string_at(config, "opencode.bin", "");
     if out.opencode.bin.starts_with('~') {
         out.opencode.bin = util::expand_home(&out.opencode.bin).to_string_lossy().to_string();
+    }
+    out.opencode.version = string_at(config, "opencode.version", DEFAULT_OPENCODE_VERSION);
+    if get_path(config, "opencode.zenClient").is_some() {
+        warnings.push(
+            "opencode.zenClient is ignored; the OpenCode free transport is built into paig".to_string(),
+        );
     }
     let models = normalize_list(get_path(config, "opencode.models"), "opencode.models", warnings);
     out.opencode.models = models
@@ -906,6 +917,12 @@ pub fn load_config() -> Result<LoadedConfig, String> {
     for (key, value) in std::env::vars() {
         file_env.insert(key, value);
     }
+    if file_env.contains_key("OPENCODE_ZEN_CLIENT") {
+        warnings.push(
+            "OPENCODE_ZEN_CLIENT is ignored; the OpenCode free transport is built into paig"
+                .to_string(),
+        );
+    }
     apply_env(&mut root, &file_env);
 
     let mut config = normalize(&mut root, &cwd, &base, &mut warnings);
@@ -987,6 +1004,18 @@ fn is_http_url(value: &str) -> bool {
         .or_else(|| lower.strip_prefix("http://"))
         .unwrap_or("");
     !rest.is_empty() && !rest.starts_with('/')
+}
+
+fn valid_opencode_version(version: &str) -> bool {
+    let version = version.trim();
+    let version = version.strip_prefix('v').unwrap_or(version);
+    version.split('.').count() >= 2
+        && !version.starts_with('.')
+        && !version.ends_with('.')
+        && !version.contains("..")
+        && version
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || ch == '.')
 }
 
 fn key_configured(api_key: &str, api_key_file: &str) -> bool {
@@ -1096,8 +1125,8 @@ fn credential_status(
         ),
         (
             "kilo",
-            if kilo { "configured" } else { "missing" },
-            "set KILO_API_KEY or kilo.apiKey",
+            if kilo { "configured" } else { "free-only" },
+            "kilo-free is keyless; set KILO_API_KEY for kilo/",
         ),
         (
             "bob",
@@ -1148,6 +1177,12 @@ pub fn validate_config(config: &Config) -> (Vec<String>, Vec<String>) {
             config.opencode.timeout_ms
         ));
     }
+    if !valid_opencode_version(&config.opencode.version) {
+        warnings.push(format!(
+            "opencode.version {:?} is not a dotted version; the User-Agent falls back to {DEFAULT_OPENCODE_VERSION}",
+            config.opencode.version
+        ));
+    }
     if config.opencode.models.is_empty() {
         errors.push("opencode.models must not be empty".to_string());
     }
@@ -1162,7 +1197,7 @@ pub fn validate_config(config: &Config) -> (Vec<String>, Vec<String>) {
         .any(|(_, state, _)| *state == "configured")
     {
         warnings.push(
-            "no backend credentials configured; only OpenCode free models will work; set CC_API_KEY, OPENCODE_API_KEY, KILO_API_KEY, PAIG_BOB_API_KEY, or PAIG_MISTRAL_API_KEY".to_string(),
+            "no backend credentials configured; only keyless free models (OpenCode, Kilo) will work; set CC_API_KEY, OPENCODE_API_KEY, KILO_API_KEY, PAIG_BOB_API_KEY, or PAIG_MISTRAL_API_KEY".to_string(),
         );
     }
     (errors, warnings)
@@ -1739,6 +1774,34 @@ mod tests {
     }
 
     #[test]
+    fn opencode_version_is_parsed_and_zen_client_is_ignored() {
+        let mut warnings = Vec::new();
+        let mut raw = Value::parse_str(
+            r#"{"opencode":{"version":"2.4.1","zenClient":"/tmp/paig-zen-client"}}"#,
+        )
+        .unwrap();
+        let parsed = normalize(&mut raw, Path::new("."), &Config::defaults(), &mut warnings);
+        assert_eq!(parsed.opencode.version, "2.4.1");
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("opencode.zenClient is ignored"))
+        );
+        let printed = parsed.to_value();
+        let opencode = printed.get("opencode").unwrap();
+        assert_eq!(opencode.get("version").unwrap().as_str(), Some("2.4.1"));
+        assert!(opencode.get("zenClient").is_none());
+    }
+
+    #[test]
+    fn opencode_free_defaults_are_current() {
+        let mut warnings = Vec::new();
+        let mut raw = Value::parse_str("{}").unwrap();
+        let parsed = normalize(&mut raw, Path::new("."), &Config::defaults(), &mut warnings);
+        assert_eq!(parsed.opencode.version, "2.3.0");
+    }
+
+    #[test]
     fn negative_numbers_are_rejected() {
         let mut config = Config::defaults();
         config.command_code.fetch_retries = -1;
@@ -1831,6 +1894,7 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(state(&config, "opencode"), "free-only");
+        assert_eq!(state(&config, "kilo"), "free-only");
         assert_eq!(state(&config, "commandCode"), "missing");
 
         config.mistral.api_key = "test".to_string();

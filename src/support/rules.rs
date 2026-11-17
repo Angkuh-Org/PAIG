@@ -30,8 +30,10 @@ pub const MAX_IDLE_PER_HOST: usize = 4;
 pub const THREAD_STACK_BYTES: usize = 256 * 1024;
 pub const WORKER_THREADS: usize = 32;
 
-/// G4: size target for the stripped release binary (1.5 MiB).
-pub const TARGET_BINARY_BYTES: u64 = 1_572_864;
+/// G4: size target for the stripped release binary (2 MiB). The in-process
+/// OpenCode free transport lives in this binary now, so the old 1.5 MiB
+/// ceiling would be a false constraint.
+pub const TARGET_BINARY_BYTES: u64 = 2_097_152;
 /// G5: server-side streaming must not accumulate the whole body.
 pub const STREAM_FLUSH_BYTES: usize = 8 * 1024;
 
@@ -70,7 +72,7 @@ pub const RULES: &[Rule] = &[
     Rule {
         id: "G4",
         title: "Small binary",
-        detail: "Stripped release target <= 1.5 MiB; the build gate warns on regression.",
+        detail: "Stripped release target <= 2 MiB; the build gate warns on regression.",
     },
     Rule {
         id: "G5",
