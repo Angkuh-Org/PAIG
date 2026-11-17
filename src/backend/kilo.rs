@@ -10,38 +10,73 @@ use crate::http::Response;
 use crate::json::Value;
 use crate::proxy;
 
-const PREFIXES: &[&str] = &["kilo/", "kilocode/"];
+const FREE_PREFIXES: &[&str] = &["kilo-free/"];
+const KEYED_PREFIXES: &[&str] = &["kilo/", "kilocode/"];
 const FALLBACK_FREE: &[&str] = &[
     "nvidia/nemotron-3.5-super-vl:free",
-    "recursive/flint-v1.0:free",
-    "xingchen-agi/xing4.0-29b-a4b:free",
+    "inclusionai/ling-3.2-flash:free",
+    "baidu/ernie-5.5-flash-preview:free",
+    "liquid/lfm-3-1.7b:free",
+    "particle-ai/particle-1:free",
     "dots-studio/dots-3-note-preview:free",
-    "liquid/lfm-2.5-2.6b:free",
     "nvidia/nemotron-3.5-lightning:free",
-    "poolside/laguna-s-2.1:free",
-    "poolside/laguna-xs-2.1:free",
     "cohere/north-mini-code:free",
-    "nvidia/nemotron-3.5-content-safety:free",
     "nvidia/nemotron-3-ultra-550b-a55b:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
 ];
 
-static CACHE: OnceLock<Mutex<Option<(Instant, Vec<Value>)>>> = OnceLock::new();
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Kind {
+    Free,
+    Keyed,
+}
 
-pub fn kilo_model_id(model: &str) -> Option<String> {
+#[derive(Debug, Clone)]
+pub struct Target {
+    pub model_id: String,
+    pub kind: Kind,
+}
+
+static CACHE: OnceLock<Mutex<Option<(Instant, Vec<(String, Value)>)>>> = OnceLock::new();
+
+fn is_free_id(id: &str) -> bool {
+    id.ends_with(":free")
+}
+
+pub fn kilo_model_id(model: &str) -> Option<Target> {
     let raw = model.trim();
-    for prefix in PREFIXES {
+    for prefix in FREE_PREFIXES {
         if let Some(rest) = raw.strip_prefix(prefix) {
             let id = rest.trim();
-            return if id.is_empty() { None } else { Some(id.to_string()) };
+            return if id.is_empty() {
+                None
+            } else {
+                Some(Target {
+                    model_id: id.to_string(),
+                    kind: Kind::Free,
+                })
+            };
+        }
+    }
+    for prefix in KEYED_PREFIXES {
+        if let Some(rest) = raw.strip_prefix(prefix) {
+            let id = rest.trim();
+            return if id.is_empty() {
+                None
+            } else {
+                Some(Target {
+                    model_id: id.to_string(),
+                    kind: Kind::Keyed,
+                })
+            };
         }
     }
     None
 }
 
-fn headers(config: &Config) -> Vec<(String, String)> {
+fn headers(config: &Config, kind: Kind) -> Vec<(String, String)> {
     let mut headers = vec![("content-type".to_string(), "application/json".to_string())];
-    if !config.kilo.api_key.is_empty() {
+    if kind == Kind::Keyed && !config.kilo.api_key.is_empty() {
         headers.push((
             "authorization".to_string(),
             format!("Bearer {}", config.kilo.api_key),
@@ -53,20 +88,43 @@ fn headers(config: &Config) -> Vec<(String, String)> {
 pub fn handle(
     body: &Value,
     res: &mut Response,
-    model_id: &str,
+    target: &Target,
     config: &Config,
     client: &HttpClient,
 ) -> Result<(), String> {
+    if target.kind == Kind::Free && !is_free_id(&target.model_id) {
+        return res
+            .send_openai_error(
+                400,
+                &format!(
+                    "kilo-free/ only serves :free models; use kilo/{} with KILO_API_KEY",
+                    target.model_id
+                ),
+                "invalid_request_error",
+                Some("kilo_free_model_required"),
+            )
+            .map_err(|error| error.to_string());
+    }
+    if target.kind == Kind::Keyed && config.kilo.api_key.is_empty() {
+        return res
+            .send_openai_error(
+                503,
+                "Kilo keyed models require KILO_API_KEY or kilo.apiKey; use kilo-free/ for :free models.",
+                "bridge_error",
+                Some("kilo_key_missing"),
+            )
+            .map_err(|error| error.to_string());
+    }
     let url = Url::parse(&format!(
         "{}/chat/completions",
         config.kilo.base_url.trim_end_matches('/')
     ))?;
     let mut payload = body.clone();
-    payload.insert("model", Value::string(model_id));
+    payload.insert("model", Value::string(&target.model_id));
     let upstream = match proxy::post_json(
         client,
         &url,
-        &headers(config),
+        &headers(config, target.kind),
         &payload,
         Duration::from_secs(300),
     ) {
@@ -85,7 +143,7 @@ pub fn handle(
     let original_model = body
         .get("model")
         .and_then(Value::as_str)
-        .unwrap_or(model_id);
+        .unwrap_or(target.model_id.as_str());
     proxy::forward(
         res,
         upstream,
@@ -151,7 +209,7 @@ fn kilo_caps(model: &Value) -> Value {
     caps
 }
 
-pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
+fn catalogue(config: &Config, client: &HttpClient) -> Vec<(String, Value)> {
     let cache = CACHE.get_or_init(|| Mutex::new(None));
     if let Ok(guard) = cache.lock() {
         if let Some((at, list)) = guard.as_ref() {
@@ -161,20 +219,13 @@ pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
         }
     }
 
-    let mut ids: Vec<(String, Value)> = FALLBACK_FREE
+    let mut entries: Vec<(String, Value)> = FALLBACK_FREE
         .iter()
         .map(|id| (id.to_string(), Value::obj()))
         .collect();
-    let mut headers = Vec::new();
-    if !config.kilo.api_key.is_empty() {
-        headers.push((
-            "authorization".to_string(),
-            format!("Bearer {}", config.kilo.api_key),
-        ));
-    }
+    // Kilo's catalogue is public; the keyless free route never sends the key.
     if let Ok(url) = Url::parse(&format!("{}/models", config.kilo.base_url.trim_end_matches('/'))) {
-        if let Ok(mut response) =
-            client.request("GET", &url, &headers, None, Some(Duration::from_secs(5)))
+        if let Ok(mut response) = client.request("GET", &url, &[], None, Some(Duration::from_secs(5)))
         {
             if response.status == 200 {
                 if let Ok(body) = response.read_all() {
@@ -184,14 +235,11 @@ pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
                                 .iter()
                                 .filter_map(|model| {
                                     let id = model.get("id").and_then(Value::as_str)?;
-                                    if !config.kilo.all_models && !id.ends_with(":free") {
-                                        return None;
-                                    }
                                     Some((id.to_string(), kilo_caps(model)))
                                 })
                                 .collect();
                             if !picked.is_empty() {
-                                ids = picked;
+                                entries = picked;
                             }
                         }
                     }
@@ -199,24 +247,42 @@ pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
             }
         }
     }
-
-    let created = crate::util::now_unix() as i64;
-    let list: Vec<Value> = ids
-        .into_iter()
-        .map(|(id, caps)| {
-            let mut model = Value::obj();
-            model.insert("id", Value::string(format!("kilo/{id}")));
-            model.insert("object", Value::string("model"));
-            model.insert("created", Value::Int(created));
-            model.insert("owned_by", Value::string("kilo"));
-            crate::backend::attach_caps(&mut model, caps);
-            model
-        })
-        .collect();
     if let Ok(mut guard) = cache.lock() {
-        *guard = Some((Instant::now(), list.clone()));
+        *guard = Some((Instant::now(), entries.clone()));
     }
-    list
+    entries
+}
+
+fn model_entry(prefix: &str, id: &str, caps: &Value, created: i64) -> Value {
+    let mut model = Value::obj();
+    model.insert("id", Value::string(format!("{prefix}{id}")));
+    model.insert("object", Value::string("model"));
+    model.insert("created", Value::Int(created));
+    model.insert("owned_by", Value::string("kilo"));
+    crate::backend::attach_caps(&mut model, caps.clone());
+    model
+}
+
+fn build_models(entries: &[(String, Value)], config: &Config, created: i64) -> Vec<Value> {
+    let mut out = Vec::new();
+    for (id, caps) in entries {
+        if is_free_id(id) {
+            out.push(model_entry("kilo-free/", id, caps, created));
+        }
+    }
+    if !config.kilo.api_key.is_empty() && config.kilo.all_models {
+        for (id, caps) in entries {
+            if is_free_id(id) {
+                continue;
+            }
+            out.push(model_entry("kilo/", id, caps, created));
+        }
+    }
+    out
+}
+
+pub fn list_models(config: &Config, client: &HttpClient) -> Vec<Value> {
+    build_models(&catalogue(config, client), config, crate::util::now_unix() as i64)
 }
 
 #[cfg(test)]
@@ -265,6 +331,67 @@ mod tests {
         assert_eq!(
             caps.get("output_cost_per_token").unwrap().as_f64(),
             Some(0.0)
+        );
+    }
+
+    #[test]
+    fn prefixes_split_free_from_keyed() {
+        let free = kilo_model_id("kilo-free/liquid/lfm-3-1.7b:free").unwrap();
+        assert_eq!(free.model_id, "liquid/lfm-3-1.7b:free");
+        assert_eq!(free.kind, Kind::Free);
+        let keyed = kilo_model_id("kilo/liquid/lfm-3-1.7b:free").unwrap();
+        assert_eq!(keyed.kind, Kind::Keyed);
+        let alias = kilo_model_id("kilocode/kilo-auto/efficient").unwrap();
+        assert_eq!(alias.model_id, "kilo-auto/efficient");
+        assert_eq!(alias.kind, Kind::Keyed);
+        assert!(kilo_model_id("kilo-free/").is_none());
+        assert!(kilo_model_id("kilo/").is_none());
+        assert!(kilo_model_id("kilocode/").is_none());
+        assert!(kilo_model_id("other/x").is_none());
+    }
+
+    #[test]
+    fn free_route_never_sends_the_key() {
+        let mut config = Config::defaults();
+        config.kilo.api_key = "secret".to_string();
+        assert!(!headers(&config, Kind::Free)
+            .iter()
+            .any(|(name, _)| name == "authorization"));
+        assert!(headers(&config, Kind::Keyed)
+            .iter()
+            .any(|(name, value)| name == "authorization" && value == "Bearer secret"));
+    }
+
+    #[test]
+    fn catalogue_splits_free_and_keyed() {
+        let entries = vec![
+            ("liquid/lfm-3-1.7b:free".to_string(), Value::obj()),
+            ("kilo-auto/efficient".to_string(), Value::obj()),
+        ];
+        let mut config = Config::defaults();
+        config.kilo.api_key.clear();
+        let ids = |list: Vec<Value>| -> Vec<String> {
+            list.iter()
+                .filter_map(|model| {
+                    model
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect()
+        };
+        let free = ids(build_models(&entries, &config, 1));
+        assert_eq!(free, vec!["kilo-free/liquid/lfm-3-1.7b:free"]);
+
+        config.kilo.api_key = "k".to_string();
+        let keyed = ids(build_models(&entries, &config, 1));
+        assert_eq!(keyed, vec!["kilo-free/liquid/lfm-3-1.7b:free"]);
+
+        config.kilo.all_models = true;
+        let all = ids(build_models(&entries, &config, 1));
+        assert_eq!(
+            all,
+            vec!["kilo-free/liquid/lfm-3-1.7b:free", "kilo/kilo-auto/efficient"]
         );
     }
 }

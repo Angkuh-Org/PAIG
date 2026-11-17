@@ -16,7 +16,7 @@ Expected output (version depends on the latest release):
   ────────────────────────────────────
   linux / x86_64 · latest
 
-  ✔ download  paig-linux-x86_64 (1.2 MiB)
+  ✔ download  paig-linux-x86_64 (1.3 MiB)
   ✔ checksum  sha256 verified
   ✔ install   /home/you/.local/bin/paig
   ✔ verify    paig v0.1.1
@@ -65,6 +65,9 @@ curl -fLO "$base/paig-linux-$arch.sha256"
 sha256sum -c "paig-linux-$arch.sha256"
 install -m 0755 "paig-linux-$arch" ~/.local/bin/paig
 ```
+
+`opencode/*` free models need no helper: the C TLS/HTTP transport is compiled
+into `paig`.
 
 ## Verify provenance
 

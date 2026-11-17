@@ -402,10 +402,16 @@ impl Response {
     }
 
     fn read_conn(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        self.conn
+        let conn = self
+            .conn
             .as_mut()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "no connection"))?
-            .read(out)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "no connection"))?;
+        loop {
+            match conn.read(out) {
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                result => return result,
+            }
+        }
     }
 
     fn read_conn_exact(&mut self, out: &mut [u8]) -> io::Result<()> {
@@ -637,7 +643,12 @@ fn read_bounded_line(
 ) -> io::Result<Vec<u8>> {
     let mut line = Vec::new();
     loop {
-        let available = conn.fill_buf()?;
+        let available = loop {
+            match conn.fill_buf() {
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                result => break result?,
+            }
+        };
         if available.is_empty() {
             if line.is_empty() {
                 return Err(io::Error::new(

@@ -28,13 +28,23 @@ The vendored Mbed TLS sources use `cc` with `-O2 -march=native -fPIC
 `build/mbedtls/libmbedtls.a`. Objects are cached in `build/mbedtls/obj` and
 rebuilt when a source, header, config, source list, or compiler flag changes.
 incremental builds reuse the C objects and
-only relink when the archive changes. 
+only relink when the archive changes.
+
+The in-process OpenCode free transport (`tools/zen-client-c/src/*.c`,
+`src/transport/zen_shim.c`, and `tools/zen-client-c/mlkem/*.c`) is compiled
+with the same style of flags into `build/zen/libzen.a`. It is linked before
+the Mbed TLS archive because it references Mbed TLS crypto symbols. The
+in-process build uses `src/transport/zen_inprocess/ca_bundle.h`, so there is
+no second CA bundle; `main.c` is a library body (`zen_shim_run` only) and the
+runtime CA pointer is supplied by `src/transport/zen_shim.c`. The ClientHello
+parity harness in `tests/zen_hello_test.c` links the same archive; it is a
+test-only executable, not an installed or released helper.
 
 `PAIG_TARGET_CPU` and `PAIG_MARCH` replace the native CPU baseline for rustc
 and the vendored C sources; local builds default to `native`. Release builds set
 them to `x86-64-v2`/`x86-64-v2` and `generic`/`armv8-a` so a binary runs on
 machines other than the builder. `PAIG_VERSION` stamps the `--version` output.
-The stripped binary targets 1.5 MiB (1,572,864 bytes); the build gate warns
+The stripped binary targets 2 MiB (2,097,152 bytes); the build gate warns
 above it but never fails the build (G4). The embedded CA bundle is part of the
 binary, so there is no runtime `libssl`/`libcrypto` or system CA file.
 
@@ -57,6 +67,7 @@ PAIG_VERSION=dev rustc --edition 2024 -C opt-level=3 -C lto=fat \
   -C overflow-checks=off -C target-cpu=generic -C strip=none \
   -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--as-needed \
   -C link-arg=-fuse-ld=lld \
+  -C link-arg=$ROOT/build/zen/libzen.a \
   -C link-arg=$ROOT/build/mbedtls/libmbedtls.a -C link-arg=-lpthread \
   -o $ROOT/build/paig.nostrip $ROOT/src/main.rs
 objcopy -O binary --only-section=.text build/paig /tmp/rel.text

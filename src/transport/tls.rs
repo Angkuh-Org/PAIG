@@ -6,7 +6,7 @@ use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[repr(C)]
 struct PaigTls {
@@ -37,7 +37,7 @@ const PAIG_TLS_TIMEOUT: c_int = -1;
 const PAIG_TLS_WANT_READ: c_int = -2;
 const PAIG_TLS_WANT_WRITE: c_int = -3;
 
-static CA_BUNDLE: &[u8] = include_bytes!("../../vendor/mbedtls/ca-bundle.pem");
+pub(crate) static CA_BUNDLE: &[u8] = include_bytes!("../../vendor/mbedtls/ca-bundle.pem");
 
 fn c_text(buf: &[c_char]) -> String {
     if buf[0] == 0 {
@@ -174,38 +174,55 @@ impl Drop for TlsStream {
     }
 }
 
+/// Mbed TLS returns WANT_READ/WANT_WRITE when the transport is not ready and
+/// expects the caller to retry with the same arguments. A blocking socket can
+/// produce these repeatedly while the peer is quiet, so bound the retry loop
+/// by wall clock instead of a strike count.
+const WANT_RETRY_BUDGET: Duration = Duration::from_secs(60);
+
+fn retry_want<F>(budget: Duration, mut call: F) -> Result<c_int, ()>
+where
+    F: FnMut() -> c_int,
+{
+    // Start the clock only once the transport actually asks for a retry. The
+    // first result is the hot path; paying a clock read per TLS read/write
+    // costs more than the retry budget it protects against.
+    let mut started = None;
+    loop {
+        let rc = call();
+        if rc != PAIG_TLS_WANT_READ && rc != PAIG_TLS_WANT_WRITE {
+            return Ok(rc);
+        }
+        let start = *started.get_or_insert_with(Instant::now);
+        if start.elapsed() >= budget {
+            return Err(());
+        }
+    }
+}
+
 impl Read for TlsStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
         }
-        let mut wants = 0;
-        loop {
-            let len = buf.len().min(c_int::MAX as usize);
-            let rc = unsafe { paig_tls_read(self.tls, buf.as_mut_ptr(), len) };
-            if rc > 0 {
-                return Ok(rc as usize);
-            }
-            match rc {
-                0 => return Ok(0),
-                PAIG_TLS_TIMEOUT => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::WouldBlock,
-                        "TLS read timed out",
-                    ));
-                }
-                PAIG_TLS_WANT_READ | PAIG_TLS_WANT_WRITE => {
-                    wants += 1;
-                    if wants > 2 {
-                        return Err(io::Error::new(
-                            io::ErrorKind::WouldBlock,
-                            "TLS read wants more data",
-                        ));
-                    }
-                    continue;
-                }
-                _ => return Err(tls_error(self.tls, "TLS read failed")),
-            }
+        let len = buf.len().min(c_int::MAX as usize);
+        let rc = retry_want(WANT_RETRY_BUDGET, || unsafe {
+            paig_tls_read(self.tls, buf.as_mut_ptr(), len)
+        })
+        .map_err(|()| {
+            io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "TLS read retry budget exhausted",
+            )
+        })?;
+        match rc {
+            n if n > 0 => Ok(n as usize),
+            0 => Ok(0),
+            PAIG_TLS_TIMEOUT => Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "TLS read timed out",
+            )),
+            _ => Err(tls_error(self.tls, "TLS read failed")),
         }
     }
 }
@@ -215,33 +232,24 @@ impl Write for TlsStream {
         if buf.is_empty() {
             return Ok(0);
         }
-        let mut wants = 0;
-        loop {
-            let len = buf.len().min(c_int::MAX as usize);
-            let rc = unsafe { paig_tls_write(self.tls, buf.as_ptr(), len) };
-            if rc > 0 {
-                return Ok(rc as usize);
-            }
-            match rc {
-                0 => return Ok(0),
-                PAIG_TLS_TIMEOUT => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::WouldBlock,
-                        "TLS write timed out",
-                    ));
-                }
-                PAIG_TLS_WANT_READ | PAIG_TLS_WANT_WRITE => {
-                    wants += 1;
-                    if wants > 2 {
-                        return Err(io::Error::new(
-                            io::ErrorKind::WouldBlock,
-                            "TLS write wants more space",
-                        ));
-                    }
-                    continue;
-                }
-                _ => return Err(tls_error(self.tls, "TLS write failed")),
-            }
+        let len = buf.len().min(c_int::MAX as usize);
+        let rc = retry_want(WANT_RETRY_BUDGET, || unsafe {
+            paig_tls_write(self.tls, buf.as_ptr(), len)
+        })
+        .map_err(|()| {
+            io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "TLS write retry budget exhausted",
+            )
+        })?;
+        match rc {
+            n if n > 0 => Ok(n as usize),
+            0 => Ok(0),
+            PAIG_TLS_TIMEOUT => Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "TLS write timed out",
+            )),
+            _ => Err(tls_error(self.tls, "TLS write failed")),
         }
     }
 
@@ -252,8 +260,11 @@ impl Write for TlsStream {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_global, pick_error};
+    use super::{
+        ensure_global, pick_error, retry_want, PAIG_TLS_WANT_READ, PAIG_TLS_WANT_WRITE,
+    };
     use std::io;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn embedded_ca_bundle_parses() {
@@ -288,5 +299,44 @@ mod tests {
     fn fallback_error_names_host_and_port() {
         let picked = pick_error(None, None, "example.com", 443);
         assert!(picked.to_string().contains("example.com:443"));
+    }
+
+    #[test]
+    fn wants_retry_past_the_old_strike_limit() {
+        let mut calls = 0;
+        let rc = retry_want(Duration::from_secs(1), || {
+            calls += 1;
+            match calls {
+                1 | 3 | 5 | 7 => PAIG_TLS_WANT_READ,
+                2 | 4 | 6 | 8 => PAIG_TLS_WANT_WRITE,
+                _ => 42,
+            }
+        })
+        .expect("repeated WANT must keep retrying");
+        assert_eq!(rc, 42);
+        assert_eq!(calls, 9);
+    }
+
+    #[test]
+    fn retry_budget_bounds_a_persistent_want() {
+        let started = Instant::now();
+        let result = retry_want(Duration::from_millis(10), || {
+            std::thread::sleep(Duration::from_millis(2));
+            PAIG_TLS_WANT_READ
+        });
+        assert!(result.is_err());
+        assert!(started.elapsed() >= Duration::from_millis(10));
+    }
+
+    #[test]
+    fn non_want_result_returns_immediately() {
+        let mut calls = 0;
+        let rc = retry_want(Duration::from_secs(1), || {
+            calls += 1;
+            7
+        })
+        .expect("plain result");
+        assert_eq!(rc, 7);
+        assert_eq!(calls, 1);
     }
 }

@@ -300,7 +300,12 @@ fn read_more(stream: &mut TcpStream, buf: &mut Vec<u8>) -> io::Result<usize> {
     // SAFETY: reserve guarantees CHUNK writable bytes after `len`; read()
     // initializes the prefix it reports, and only that prefix is committed.
     let dst = unsafe { std::slice::from_raw_parts_mut(spare.as_mut_ptr() as *mut u8, CHUNK) };
-    let n = stream.read(dst)?;
+    let n = loop {
+        match stream.read(dst) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            result => break result?,
+        }
+    };
     unsafe { buf.set_len(len + n) };
     Ok(n)
 }

@@ -56,6 +56,22 @@ const MBEDTLS_CFLAGS: &[&str] = &[
     "-DMBEDTLS_CONFIG_FILE=\"paig_config.h\"",
 ];
 
+// The OpenCode free transport is compiled into the gateway. main.c is now a
+// library body (zen_shim_run only); the external CA header points it at
+// PAIG's existing embedded bundle instead of a second copy.
+const ZEN_CFLAGS: &[&str] = &[
+    "-O2",
+    "-std=gnu11",
+    "-fPIC",
+    "-ffunction-sections",
+    "-fdata-sections",
+    "-fno-unwind-tables",
+    "-fno-asynchronous-unwind-tables",
+    "-DNDEBUG",
+    "-DMBEDTLS_CONFIG_FILE=\"paig_config.h\"",
+    "-DPAIG_ZEN_EXTERNAL_CA",
+];
+
 fn target_cpu() -> String {
     std::env::var("PAIG_TARGET_CPU")
         .ok()
@@ -236,7 +252,24 @@ fn build_jobs(limit: usize) -> usize {
         .min(limit)
 }
 
+fn mbedtls_includes(root: &Path) -> Vec<PathBuf> {
+    vec![
+        root.join("vendor/mbedtls"),
+        root.join("vendor/mbedtls/include"),
+        root.join("vendor/mbedtls/library"),
+    ]
+}
+
 fn compile_c_jobs(root: &Path, jobs: Vec<(PathBuf, PathBuf)>) -> Result<(), String> {
+    compile_c_jobs_with(root, jobs, &mbedtls_flags(), &mbedtls_includes(root))
+}
+
+fn compile_c_jobs_with(
+    root: &Path,
+    jobs: Vec<(PathBuf, PathBuf)>,
+    flags: &[String],
+    includes: &[PathBuf],
+) -> Result<(), String> {
     if jobs.is_empty() {
         return Ok(());
     }
@@ -253,15 +286,11 @@ fn compile_c_jobs(root: &Path, jobs: Vec<(PathBuf, PathBuf)>) -> Result<(), Stri
                 }
                 let (source, object) = &jobs[index];
                 let mut command = Command::new(&cc);
+                command.current_dir(root).args(flags);
+                for include in includes {
+                    command.arg("-I").arg(include);
+                }
                 command
-                    .current_dir(root)
-                    .args(mbedtls_flags())
-                    .arg("-I")
-                    .arg(root.join("vendor/mbedtls"))
-                    .arg("-I")
-                    .arg(root.join("vendor/mbedtls/include"))
-                    .arg("-I")
-                    .arg(root.join("vendor/mbedtls/library"))
                     .arg("-c")
                     .arg(source)
                     .arg("-o")
@@ -395,11 +424,165 @@ fn build_mbedtls(root: &Path) -> Result<PathBuf, String> {
     Ok(archive)
 }
 
+fn c_sources(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let entries = fs::read_dir(dir)
+        .map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
+    let mut sources = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("c") {
+            sources.push(path);
+        }
+    }
+    sources.sort();
+    Ok(sources)
+}
+
+fn c_headers(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let entries = fs::read_dir(dir)
+        .map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
+    let mut headers = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("h") {
+            headers.push(path);
+        }
+    }
+    headers.sort();
+    Ok(headers)
+}
+
+fn build_zen(root: &Path) -> Result<PathBuf, String> {
+    let build_dir = root.join("build/zen");
+    let obj_dir = build_dir.join("obj");
+    fs::create_dir_all(&build_dir)
+        .map_err(|error| format!("cannot create {}: {error}", build_dir.display()))?;
+
+    let zen_root = root.join("tools/zen-client-c");
+    let mut sources = c_sources(&zen_root.join("src"))?;
+    sources.push(root.join("src/transport/zen_shim.c"));
+    sources.extend(c_sources(&zen_root.join("mlkem"))?);
+
+    let archive = build_dir.join("libzen.a");
+    let stamp_path = build_dir.join("stamp");
+    let mut headers = c_headers(&zen_root.join("src"))?;
+    headers.extend(c_headers(&zen_root.join("mlkem"))?);
+    headers.push(root.join("src/transport/zen_inprocess/ca_bundle.h"));
+    let mut header_text = String::new();
+    for header in &headers {
+        let body = fs::read_to_string(header).unwrap_or_default();
+        header_text.push_str(&format!("--- {} ---\n{body}\n", header.display()));
+    }
+    let config = fs::read_to_string(root.join("vendor/mbedtls/paig_config.h"))
+        .unwrap_or_default();
+    let cc = cc_name();
+    let version = Command::new(&cc)
+        .arg("--version")
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .unwrap_or_default();
+    let stamp = format!(
+        "cc: {cc}\nversion: {version}\nflags: {} -march={}\nheaders:\n{header_text}\nconfig:\n{config}\nsources:\n{}\n",
+        ZEN_CFLAGS.join(" "),
+        target_march(),
+        sources
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let mut full = fs::read_to_string(&stamp_path).unwrap_or_default() != stamp;
+    if !full {
+        match mtime(&archive) {
+            Some(archive_time) => {
+                full = sources.iter().any(|source| {
+                    mtime(source).map(|time| time > archive_time).unwrap_or(true)
+                });
+            }
+            None => full = true,
+        }
+    }
+    if full {
+        let _ = fs::remove_dir_all(&obj_dir);
+        let _ = fs::remove_file(&archive);
+    }
+    fs::create_dir_all(&obj_dir)
+        .map_err(|error| format!("cannot create {}: {error}", obj_dir.display()))?;
+
+    let mut jobs = Vec::new();
+    let mut objects = Vec::new();
+    for source in &sources {
+        let base = source
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| format!("invalid C source name: {}", source.display()))?;
+        let prefix = if source == &root.join("src/transport/zen_shim.c") {
+            "zen-paig"
+        } else if source.starts_with(zen_root.join("mlkem")) {
+            "zen-mlkem"
+        } else {
+            "zen-src"
+        };
+        let object = obj_dir.join(format!("{prefix}-{base}.o"));
+        if full || newer_than(source, &object) {
+            jobs.push((source.clone(), object.clone()));
+        }
+        objects.push(object);
+    }
+
+    let job_count = jobs.len();
+    let spinner = if job_count == 0 {
+        None
+    } else {
+        Spinner::start("building", "build/zen/libzen.a", "1;33")
+    };
+    if job_count > 0 && !color() {
+        println!("  [C] compiling {job_count} zen sources -> build/zen/libzen.a");
+    }
+    let mut flags: Vec<String> = ZEN_CFLAGS.iter().map(|flag| (*flag).to_string()).collect();
+    flags.push(format!("-march={}", target_march()));
+    let mut includes = vec![
+        root.join("src/transport/zen_inprocess"),
+        zen_root.join("src"),
+        zen_root.join("mlkem"),
+    ];
+    includes.extend(mbedtls_includes(root));
+    compile_c_jobs_with(root, jobs, &flags, &includes)?;
+    if let Some(spinner) = spinner {
+        spinner.finish();
+    }
+
+    let archive_stale = full
+        || !archive.exists()
+        || objects.iter().any(|object| newer_than(object, &archive));
+    if archive_stale {
+        let _ = fs::remove_file(&archive);
+        let ar = ar_name();
+        let mut command = Command::new(&ar);
+        command.current_dir(root).arg("rcs").arg(&archive);
+        for object in &objects {
+            command.arg(object);
+        }
+        let status = command
+            .status()
+            .map_err(|error| format!("cannot run {ar}: {error}"))?;
+        if !status.success() {
+            return Err(format!("{ar} failed ({status})"));
+        }
+        fs::write(&stamp_path, stamp)
+            .map_err(|error| format!("cannot write {}: {error}", stamp_path.display()))?;
+    }
+    Ok(archive)
+}
+
 fn up_to_date(
     root: &Path,
     bin: &Path,
     stamp_path: &Path,
     archive: &Path,
+    zen_archive: &Path,
 ) -> Result<bool, String> {
     let Some(bin_time) = mtime(bin) else {
         return Ok(false);
@@ -413,6 +596,10 @@ fn up_to_date(
         }
     }
     match mtime(archive) {
+        Some(archive_time) if archive_time <= bin_time => {}
+        _ => return Ok(false),
+    }
+    match mtime(zen_archive) {
         Some(archive_time) if archive_time <= bin_time => {}
         _ => return Ok(false),
     }
@@ -439,9 +626,10 @@ fn build(root: &Path) -> Result<(), String> {
     fs::create_dir_all(&build_dir)
         .map_err(|error| format!("cannot create {}: {error}", build_dir.display()))?;
     let archive = build_mbedtls(root)?;
+    let zen_archive = build_zen(root)?;
     let bin = build_dir.join("paig");
     let stamp = build_dir.join("paig.stamp");
-    let rebuilt = !up_to_date(root, &bin, &stamp, &archive)?;
+    let rebuilt = !up_to_date(root, &bin, &stamp, &archive, &zen_archive)?;
     let shown = bin.strip_prefix(root).unwrap_or_else(|_| bin.as_path());
     let spinner = if rebuilt {
         Spinner::start("building", &shown.to_string_lossy(), "1;32")
@@ -453,6 +641,8 @@ fn build(root: &Path) -> Result<(), String> {
         command
             .args(rustc_flags())
             .env("PAIG_VERSION", build_version())
+            .arg("-C")
+            .arg(format!("link-arg={}", zen_archive.display()))
             .arg("-C")
             .arg(format!("link-arg={}", archive.display()))
             .arg("-C")
@@ -509,10 +699,13 @@ fn test(root: &Path, filters: &[String]) -> Result<(), String> {
     fs::create_dir_all(&build_dir)
         .map_err(|error| format!("cannot create {}: {error}", build_dir.display()))?;
     let archive = build_mbedtls(root)?;
+    let zen_archive = build_zen(root)?;
     let test_bin = build_dir.join("paig-test");
     let mut command = Command::new(rustc_name());
     command
         .args(["--edition", "2024", "--test", "-C", "opt-level=2"])
+        .arg("-C")
+        .arg(format!("link-arg={}", zen_archive.display()))
         .arg("-C")
         .arg(format!("link-arg={}", archive.display()))
         .arg("-C")
@@ -541,7 +734,15 @@ fn test(root: &Path, filters: &[String]) -> Result<(), String> {
 
 fn clean(root: &Path) -> Result<(), String> {
     let build_dir = root.join("build");
-    for name in ["paig", "paig.rmeta", "paig-test", "paig.stamp"] {
+    for name in [
+        "paig",
+        "paig.rmeta",
+        "paig-test",
+        "paig.stamp",
+        "zen-cancel-test",
+        "zen-hello-test",
+        "zen-x25519-test",
+    ] {
         let path = build_dir.join(name);
         let shown = path.strip_prefix(root).unwrap_or_else(|_| path.as_path());
         match fs::remove_file(&path) {
@@ -550,14 +751,14 @@ fn clean(root: &Path) -> Result<(), String> {
             Err(error) => return Err(format!("cannot remove {}: {error}", path.display())),
         }
     }
-    let mbedtls = build_dir.join("mbedtls");
-    let shown = mbedtls
-        .strip_prefix(root)
-        .unwrap_or_else(|_| mbedtls.as_path());
-    match fs::remove_dir_all(&mbedtls) {
-        Ok(()) => report("\u{f1f8}", "[-]", "1;33", "removed", shown, None),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("cannot remove {}: {error}", mbedtls.display())),
+    for name in ["mbedtls", "zen"] {
+        let dir = build_dir.join(name);
+        let shown = dir.strip_prefix(root).unwrap_or_else(|_| dir.as_path());
+        match fs::remove_dir_all(&dir) {
+            Ok(()) => report("\u{f1f8}", "[-]", "1;33", "removed", shown, None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("cannot remove {}: {error}", dir.display())),
+        }
     }
     Ok(())
 }
